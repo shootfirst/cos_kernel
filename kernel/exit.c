@@ -806,9 +806,11 @@ static void synchronize_group_exit(struct task_struct *tsk, long code)
 	spin_unlock_irq(&sighand->siglock);
 }
 
+// dzh：
 void __noreturn do_exit(long code)
 {
 	struct task_struct *tsk = current;
+	printk("exit start %d\n", tsk->pid);
 	int group_dead;
 
 	WARN_ON(irqs_disabled());

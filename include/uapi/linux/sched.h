@@ -119,6 +119,9 @@ struct clone_args {
 #define SCHED_IDLE		5
 #define SCHED_DEADLINE		6
 
+// SCHED_CLASS_COS
+#define SCHED_COS       8
+
 /* Can be ORed in to make sure the process is reverted back to SCHED_NORMAL on fork */
 #define SCHED_RESET_ON_FORK     0x40000000
 

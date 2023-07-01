@@ -2497,7 +2497,7 @@ static struct rq *move_queued_task(struct rq *rq, struct rq_flags *rf,
 				   struct task_struct *p, int new_cpu)
 {
 	lockdep_assert_rq_held(rq);
-
+	
 	deactivate_task(rq, p, DEQUEUE_NOCLOCK);
 	set_task_cpu(p, new_cpu);
 	rq_unlock(rq, rf);
@@ -2765,8 +2765,10 @@ __do_set_cpus_allowed(struct task_struct *p, struct affinity_context *ctx)
 
 	if (queued)
 		enqueue_task(rq, p, ENQUEUE_RESTORE | ENQUEUE_NOCLOCK);
-	if (running)
+	if (running) 
 		set_next_task(rq, p);
+		
+
 }
 
 /*
@@ -3385,7 +3387,6 @@ static void __migrate_swap_task(struct task_struct *p, int cpu)
 
 		rq_pin_lock(src_rq, &srf);
 		rq_pin_lock(dst_rq, &drf);
-
 		deactivate_task(src_rq, p, 0);
 		set_task_cpu(p, cpu);
 		activate_task(dst_rq, p, 0);
@@ -6336,7 +6337,6 @@ static bool try_steal_cookie(int this, int that)
 		 */
 		if (sched_task_is_throttled(p, this))
 			goto next;
-
 		deactivate_task(src, p, 0);
 		set_task_cpu(p, this);
 		activate_task(dst, p, 0);
@@ -6661,6 +6661,7 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 			 *
 			 * After this, schedule() must not care about p->state any more.
 			 */
+			// printk("f\n");
 			deactivate_task(rq, prev, DEQUEUE_SLEEP | DEQUEUE_NOCLOCK);
 
 			if (prev->in_iowait) {
@@ -6724,7 +6725,7 @@ void __noreturn do_task_dead(void)
 
 	/* Tell freezer to ignore us: */
 	current->flags |= PF_NOFREEZE;
-
+	// printk("here\n");
 	__schedule(SM_NONE);
 	BUG();
 
@@ -7041,6 +7042,10 @@ static void __setscheduler_prio(struct task_struct *p, int prio)
 		p->sched_class = &dl_sched_class;
 	else if (rt_prio(prio))
 		p->sched_class = &rt_sched_class;
+// #ifdef CONFIG_SCHED_CLASS_COS
+	else if (task_should_cos(p))
+		p->sched_class = &cos_sched_class;
+// #endif
 	else
 		p->sched_class = &fair_sched_class;
 
@@ -7198,7 +7203,6 @@ static inline int rt_effective_prio(struct task_struct *p, int prio)
 	return prio;
 }
 #endif
-
 void set_user_nice(struct task_struct *p, long nice)
 {
 	bool queued, running;
@@ -7619,6 +7623,7 @@ req_priv:
 	return 0;
 }
 
+// dzh：起点
 static int __sched_setscheduler(struct task_struct *p,
 				const struct sched_attr *attr,
 				bool user, bool pi)
@@ -7798,10 +7803,16 @@ change:
 
 	queued = task_on_rq_queued(p);
 	running = task_current(rq, p);
-	if (queued)
+	
+	if (queued) {
 		dequeue_task(rq, p, queue_flags);
-	if (running)
+	}
+		
+	
+	if (running) {
 		put_prev_task(rq, p);
+	}
+		
 
 	prev_class = p->sched_class;
 
@@ -7818,11 +7829,12 @@ change:
 		 */
 		if (oldprio < p->prio)
 			queue_flags |= ENQUEUE_HEAD;
-
 		enqueue_task(rq, p, queue_flags);
 	}
-	if (running)
+	if (running) {
 		set_next_task(rq, p);
+	}
+		
 
 	check_class_changed(rq, p, prev_class, oldprio);
 
@@ -7840,7 +7852,6 @@ change:
 	/* Run balance callbacks after we've adjusted the PI chain: */
 	balance_callbacks(rq, head);
 	preempt_enable();
-
 	return 0;
 
 unlock:
@@ -7964,6 +7975,7 @@ EXPORT_SYMBOL_GPL(sched_set_normal);
 static int
 do_sched_setscheduler(pid_t pid, int policy, struct sched_param __user *param)
 {
+	printk("start %d\n", policy);
 	struct sched_param lparam;
 	struct task_struct *p;
 	int retval;
@@ -7984,7 +7996,7 @@ do_sched_setscheduler(pid_t pid, int policy, struct sched_param __user *param)
 		retval = sched_setscheduler(p, policy, &lparam);
 		put_task_struct(p);
 	}
-
+	printk("end %d\n", policy);
 	return retval;
 }
 
@@ -9914,7 +9926,9 @@ void __init sched_init(void)
 	int i;
 
 	/* Make sure the linker didn't screw up */
-	BUG_ON(&idle_sched_class != &fair_sched_class + 1 ||
+	// SCHED_CLASS_COS
+	BUG_ON(&idle_sched_class != &cos_sched_class + 1 ||
+		   &cos_sched_class != &fair_sched_class + 1 ||
 	       &fair_sched_class != &rt_sched_class + 1 ||
 	       &rt_sched_class   != &dl_sched_class + 1);
 #ifdef CONFIG_SMP
@@ -10495,6 +10509,7 @@ static void sched_change_group(struct task_struct *tsk, struct task_group *group
  * now. This function just updates tsk->se.cfs_rq and tsk->se.parent to reflect
  * its new group.
  */
+// dzh：1
 void sched_move_task(struct task_struct *tsk)
 {
 	int queued, running, queue_flags =
@@ -10619,7 +10634,6 @@ static void cpu_cgroup_attach(struct cgroup_taskset *tset)
 {
 	struct task_struct *task;
 	struct cgroup_subsys_state *css;
-
 	cgroup_taskset_for_each(task, css, tset)
 		sched_move_task(task);
 }
