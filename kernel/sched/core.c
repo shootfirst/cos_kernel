@@ -3612,6 +3612,7 @@ out:
 /*
  * The caller (fork, wakeup) owns p->pi_lock, ->cpus_ptr is stable.
  */
+// dzh：注意
 static inline
 int select_task_rq(struct task_struct *p, int cpu, int wake_flags)
 {
@@ -6588,6 +6589,7 @@ pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
  *
  * WARNING: must be called with preemption disabled!
  */
+// dzh：
 static void __sched notrace __schedule(unsigned int sched_mode)
 {
 	struct task_struct *prev, *next;
@@ -6777,6 +6779,7 @@ static void sched_update_worker(struct task_struct *tsk)
 	}
 }
 
+// dzh：
 asmlinkage __visible void __sched schedule(void)
 {
 	struct task_struct *tsk = current;
@@ -7999,6 +8002,47 @@ do_sched_setscheduler(pid_t pid, int policy, struct sched_param __user *param)
 	printk("end %d\n", policy);
 	return retval;
 }
+// SCHED_CLASS_COS
+static int do_set_lord(void) {
+	int retval = 0;
+	struct task_struct *p;
+	struct rq *rq;
+	int cpu;
+	preempt_disable();
+
+	// 获取当前运行cpu
+	cpu = smp_processor_id();
+	rq = cpu_rq(cpu);
+
+	// 获取当前线程
+	rcu_read_lock();
+	p = find_process_by_pid(0);
+	if (likely(p)) {
+		get_task_struct(p);
+	} else {
+		rcu_read_unlock();
+		return -ESRCH;
+	}
+	rcu_read_unlock();
+
+	// 设置调度类为cos
+	struct sched_param param = {
+		.sched_priority = 0,
+	};
+	if (likely(p)) {
+		retval = sched_setscheduler(p, SCHED_COS, &param);
+		put_task_struct(p);
+	}
+	if (retval != 0) 
+		return retval;
+
+	// 设置lord为当前线程
+	rq->cos.lord = p; // TODO：线程不安全, --------------------------解锁
+	p->cos.cpu_id = cpu; // 绑核
+	sched_preempt_enable_no_resched();
+	// 设置成功，返回
+	return retval;
+}
 
 /*
  * Mimics kernel/events/core.c perf_copy_attr().
@@ -8069,6 +8113,18 @@ SYSCALL_DEFINE3(sched_setscheduler, pid_t, pid, int, policy, struct sched_param 
 		return -EINVAL;
 
 	return do_sched_setscheduler(pid, policy, param);
+}
+
+/**
+ * sys_set_lord - set current thread as the lord of cpu
+ * @cpu: the cpu id in question.
+ *
+ * Return: 0 on success. An error code otherwise.
+ */
+// SCHED_CLASS_COS
+SYSCALL_DEFINE0(set_lord)
+{
+	return do_set_lord();
 }
 
 /**

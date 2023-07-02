@@ -11,7 +11,7 @@
 
 void init_cos_rq(struct cos_rq *cos_rq) 
 {
-	cos_rq->agent = NULL;
+	cos_rq->lord = NULL;
 }
 /*
  * Used by sched_fork() and __setscheduler_prio() to pick the matching
@@ -23,12 +23,12 @@ bool task_should_cos(struct task_struct *p)
 }
 
 void enqueue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
-	rq->cos.agent = p;
+	// rq->cos.lord = p;
 	printk("enqueue_task_cos  %d\n", p->pid);
 }
 
 void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
-	rq->cos.agent = NULL;
+	// rq->cos.lord = NULL;
 	printk("dequeue_task_cos  %d\n", p->pid);
 }
 
@@ -47,7 +47,14 @@ void check_preempt_curr_cos(struct rq *rq, struct task_struct *p, int flags) {
 
 struct task_struct *pick_next_task_cos(struct rq *rq) {
 	// printk("hello\n");
-	return rq->cos.agent;
+	if (rq->cos.lord == NULL) {
+		return NULL;
+	}
+	if (task_is_running(rq->cos.lord)) {
+		return rq->cos.lord;
+	}
+	return NULL;
+	
 }
 
 void put_prev_task_cos(struct rq *rq, struct task_struct *p) {
@@ -58,6 +65,19 @@ void set_next_task_cos(struct rq *rq, struct task_struct *p, bool first) {
 	printk("set_next_task_cos\n");
 }
 
+void task_dead_cos(struct task_struct *p) {
+	preempt_disable();
+	struct rq *rq;
+	int cpu;
+	
+	cpu = smp_processor_id();
+	rq = cpu_rq(cpu);
+	if (rq->cos.lord == p) {
+		rq->cos.lord = NULL;
+	}
+
+	sched_preempt_enable_no_resched();
+}
 
 int balance_cos(struct rq *rq, struct task_struct *prev, struct rq_flags *rf) {
 	// printk("balance_cos\n");
@@ -66,7 +86,7 @@ int balance_cos(struct rq *rq, struct task_struct *prev, struct rq_flags *rf) {
 
 int select_task_rq_cos(struct task_struct *p, int task_cpu, int flags) {
 	printk("select_task_rq_cos\n");
-	return 1;
+	return p->cos.cpu_id;
 }
 
 void set_cpus_allowed_cos(struct task_struct *p, struct affinity_context *ctx) {
@@ -130,6 +150,7 @@ DEFINE_SCHED_CLASS(cos) = {
 
 	.put_prev_task		= put_prev_task_cos,
 	.set_next_task          = set_next_task_cos,
+	.task_dead = task_dead_cos,
 
 #ifdef CONFIG_SMP
 	.balance		= balance_cos,

@@ -110,6 +110,7 @@ struct task_struct init_task
 		// .ops_state	= ATOMIC_INIT(0),
 		// .runnable_at	= INITIAL_JIFFIES,
 		.slice		= 0,
+		.cpu_id     = 1,
 	},
 // #endif
 #endif

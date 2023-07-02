@@ -656,7 +656,7 @@ struct cfs_rq {
 
 // #ifdef CONFIG_SCHED_CLASS_COS
 struct cos_rq {
-	struct task_struct *agent;
+	struct task_struct *lord;
 	
 };
 // #endif /* CONFIG_SCHED_CLASS_COS */
