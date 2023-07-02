@@ -9,6 +9,10 @@
 
 // CONFIG_SCHED_CLASS_COS
 
+void init_cos_rq(struct cos_rq *cos_rq) 
+{
+	cos_rq->agent = NULL;
+}
 /*
  * Used by sched_fork() and __setscheduler_prio() to pick the matching
  * sched_class. dl/rt are already handled.
@@ -19,11 +23,13 @@ bool task_should_cos(struct task_struct *p)
 }
 
 void enqueue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
-	printk("enqueue_task_cos\n");
+	rq->cos.agent = p;
+	printk("enqueue_task_cos  %d\n", p->pid);
 }
 
 void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
-	printk("dequeue_task_cos %d\n", p->pid);
+	rq->cos.agent = NULL;
+	printk("dequeue_task_cos  %d\n", p->pid);
 }
 
 void yield_task_cos(struct rq *rq) {
@@ -41,7 +47,7 @@ void check_preempt_curr_cos(struct rq *rq, struct task_struct *p, int flags) {
 
 struct task_struct *pick_next_task_cos(struct rq *rq) {
 	// printk("hello\n");
-	return NULL;
+	return rq->cos.agent;
 }
 
 void put_prev_task_cos(struct rq *rq, struct task_struct *p) {

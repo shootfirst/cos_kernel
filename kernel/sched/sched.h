@@ -656,42 +656,8 @@ struct cfs_rq {
 
 // #ifdef CONFIG_SCHED_CLASS_COS
 struct cos_rq {
-	struct task_struct *agent;	/* protected by e->lock and rq->lock */
-	uint32_t agent_barrier;
-	bool blocked_in_run;		/* agent is blocked in 'ghost_run()' */
-	bool agent_on_rq;		/* agent is on_rq */
-	bool agent_should_wake;		/* racy reads and writes */
-	uint64_t prev_resched_seq;	/* racy, cpu_seqnum to resched. DEPRECATED as of ABI 79. */
-	bool set_must_resched;		/* whether to force must_resched at reschedule */
-	bool must_resched;		/* rq->curr must reschedule in PNT */
-	bool ignore_prev_preemption;
-	bool check_prev_preemption;	/* see 'ghost_prepare_task_switch()' */
-	bool skip_latched_preemption;
-	bool in_pnt_bpf;		/* DEPRECATED: ABI 75 and older */
-	bool dont_idle_once;		/* Don't idle next time rq->idle runs */
-	int ghost_nr_running;
-	int run_flags;			/* flags passed to 'ghost_run()' */
-	uint64_t cpu_seqnum;		/* history for msgs about this cpu */
-
-	/* For deferring work to the balance_callback */
-	struct list_head enclave_work;	/* work to do */
-	struct callback_head ew_head;	/* callback management */
-
-	struct list_head tasks;
-
-	struct task_struct *latched_task;  /* task returned by pick_next_task */
-
-	long switchto_count;
-
-	/*
-	 * zero      not participating in a sync-group rendezvous.
-	 * negative  sync-group in process of committing.
-	 * positive  sync-group successfully committed.
-	 *
-	 * Thus a CPU must not return from __schedule() as long as
-	 * 'rq->ghost.rendezvous' is negative.
-	 */
-	int64_t rendezvous;
+	struct task_struct *agent;
+	
 };
 // #endif /* CONFIG_SCHED_CLASS_COS */
 
@@ -2875,6 +2841,8 @@ static inline void resched_latency_warn(int cpu, u64 latency) {}
 extern void init_cfs_rq(struct cfs_rq *cfs_rq);
 extern void init_rt_rq(struct rt_rq *rt_rq);
 extern void init_dl_rq(struct dl_rq *dl_rq);
+// SCHED_CLASS_COS
+extern void init_cos_rq(struct cos_rq *cos_rq);
 
 extern void cfs_bandwidth_usage_inc(void);
 extern void cfs_bandwidth_usage_dec(void);
