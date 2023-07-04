@@ -794,6 +794,7 @@ struct task_struct {
 	struct sched_dl_entity		dl;
 // #ifdef CONFIG_SCHED_CLASS_COS
 	struct sched_cos_entity		cos;
+	struct rhash_head	hash_node;
 // #endif
 	const struct sched_class	*sched_class;
 

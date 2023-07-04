@@ -12,6 +12,9 @@
 void init_cos_rq(struct cos_rq *cos_rq) 
 {
 	cos_rq->lord = NULL;
+	cos_rq->next_to_sched = NULL;
+	BUG_ON(rhashtable_init(&cos_rq->task_struct_hash, &task_hash_params));
+	
 }
 /*
  * Used by sched_fork() and __setscheduler_prio() to pick the matching
@@ -25,11 +28,31 @@ bool task_should_cos(struct task_struct *p)
 void enqueue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 	// rq->cos.lord = p;
 	printk("enqueue_task_cos  %d\n", p->pid);
+	// 加入哈希表
+	rhashtable_insert_fast(&rq->cos.task_struct_hash, &p->hash_node,
+				     task_hash_params);
+	if (NULL == rhashtable_lookup_fast(&rq->cos.task_struct_hash, &p->pid,
+					      task_hash_params)) {
+		printk("enqueue_task_cos invalid!!!  %d\n", p->pid);
+	} else {
+		printk("enqueue_task_cos valid!!!  %d\n", p->pid);
+	}
+
 }
 
 void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 	// rq->cos.lord = NULL;
 	printk("dequeue_task_cos  %d\n", p->pid);
+	// 从哈希表中移除，若是next_to_sched，将其置为空指针
+	rhashtable_remove_fast(&rq->cos.task_struct_hash, &p->hash_node, task_hash_params);
+	if (rq->cos.next_to_sched == p) 
+		rq->cos.next_to_sched = NULL;
+	if (NULL != rhashtable_lookup_fast(&rq->cos.task_struct_hash, &p->pid,
+					      task_hash_params)) {
+		printk("dequeue_task_cos invalid!!!  %d\n", p->pid);
+	} else {
+		printk("dequeue_task_cos valid!!!  %d\n", p->pid);
+	}
 }
 
 void yield_task_cos(struct rq *rq) {

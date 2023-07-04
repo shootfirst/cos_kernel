@@ -7046,8 +7046,13 @@ static void __setscheduler_prio(struct task_struct *p, int prio)
 	else if (rt_prio(prio))
 		p->sched_class = &rt_sched_class;
 // #ifdef CONFIG_SCHED_CLASS_COS
-	else if (task_should_cos(p))
+	else if (task_should_cos(p)) {
 		p->sched_class = &cos_sched_class;
+		// // 绑核
+		// preempt_disable();
+		// p->cos.cpu_id = smp_processor_id();
+		// sched_preempt_enable_no_resched();
+	}
 // #endif
 	else
 		p->sched_class = &fair_sched_class;

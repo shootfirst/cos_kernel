@@ -11,7 +11,7 @@
 
 // #ifdef CONFIG_SCHED_CLASS_COS
 
-#include <linux/llist.h>
+#include <linux/rhashtable.h>
 
 /*
  * Dispatch queue (dsq) is a simple FIFO which is used to buffer between the
