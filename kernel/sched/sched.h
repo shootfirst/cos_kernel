@@ -659,6 +659,7 @@ struct cos_rq {
 	struct task_struct *lord;
 	struct task_struct *next_to_sched; // return in pick_next_task
 	struct rhashtable task_struct_hash;
+	struct cos_message_queue *mq;
 };
 // #endif /* CONFIG_SCHED_CLASS_COS */
 

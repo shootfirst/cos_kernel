@@ -5,9 +5,21 @@ static const struct rhashtable_params task_hash_params = {
 	.head_offset		= offsetof(struct task_struct, hash_node),
 };
 
+struct msg {
+	u_int32_t pid;
+	u_int32_t type;
+};
+
+struct cos_message_queue {
+	u_int32_t head;
+	u_int32_t tail;
+	struct msg data[511];
+};
+
 extern const struct sched_class cos_sched_class;
 
 bool task_should_cos(struct task_struct *p);
+int cos_create_queue(struct cos_rq *cos_rq);
 
 
 

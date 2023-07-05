@@ -9,10 +9,116 @@
 
 // CONFIG_SCHED_CLASS_COS
 
+#include <linux/mm.h>
+#include <linux/file.h>
+#include <linux/anon_inodes.h>
+
+static int _cos_mmap_common(struct vm_area_struct *vma, ulong mapsize)
+{
+	static const struct vm_operations_struct cos_vm_ops = {};
+
+	/*
+	 * VM_MAYSHARE indicates that MAP_SHARED was set in 'mmap' flags.
+	 *
+	 * Checking VM_SHARED seems intuitive here but this bit is cleared
+	 * by do_mmap() if the underlying file is readonly (as is the case
+	 * for a sw_region file).
+	 */
+	if (!(vma->vm_flags & VM_MAYSHARE))
+		return -EINVAL;
+
+	/*
+	 * Mappings are always readable and 'do_mmap()' ensures that
+	 * FMODE_WRITE and VM_WRITE are coherent so the only remaining
+	 * check is against VM_EXEC.
+	 */
+	if (vma->vm_flags & VM_EXEC)
+		return -EACCES;
+
+	/* The entire region must be mapped */
+	if (vma->vm_pgoff)
+		return -EINVAL;
+
+	if (vma->vm_end - vma->vm_start != mapsize) {
+		printk("vma->vm_end %llu - vma->vm_start%llu = %llu != size %d\n", vma->vm_end, vma->vm_start, vma->vm_end- vma->vm_start, mapsize);
+		return -EINVAL;
+	}
+		
+
+	/*
+	 * Don't allow mprotect(2) to relax permissions beyond what
+	 * would have been allowed by this function.
+	 *
+	 * Mappings always readable and 'do_mmap()' ensures that
+	 * FMODE_WRITE and VM_MAYWRITE are coherent so just clear
+	 * VM_MAYEXEC here.
+	 */
+	// vma->vm_flags &= ~VM_MAYEXEC;
+	// vma->vm_flags |= VM_DONTCOPY;
+
+	/*
+	 * Initialize 'vma->vm_ops' to avoid vma_is_anonymous() false-positive.
+	 */
+	vma->vm_ops = &cos_vm_ops;
+	return 0;
+}
+
+
+static int cos_region_mmap(struct file *file, struct vm_area_struct *vma,
+			     void *addr, ulong mapsize)
+{
+	int error = 0;
+	error = _cos_mmap_common(vma, mapsize);
+	
+	if (!error)
+		error = remap_vmalloc_range(vma, addr, 0);
+	return error;
+}
+
+static int queue_mmap(struct file *file, struct vm_area_struct *vma)
+{
+	struct cos_message_queue *mq = file->private_data;
+
+	return cos_region_mmap(file, vma, mq, sizeof(struct cos_message_queue));
+}
+
+static int queue_release(struct inode *inode, struct file *file)
+{
+	return 0;
+}
+
+static const struct file_operations queue_fops = {
+	.release		= queue_release,
+	.mmap			= queue_mmap,
+};
+
+int cos_create_queue(struct cos_rq *cos_rq) {
+	cos_rq->mq = vmalloc_user(sizeof(struct cos_message_queue));
+
+	if (!cos_rq->mq) {
+		return -ESRCH;
+	}
+
+	int fd = anon_inode_getfd("[cos_queue]", &queue_fops, cos_rq->mq,
+			      O_RDWR | O_CLOEXEC);
+
+	if (fd < 0) {
+		vfree(cos_rq->mq);
+		cos_rq->mq = NULL; //TODO
+	}
+	cos_rq->mq->tail = 1;
+	cos_rq->mq->data[0].pid = 666;
+
+	return fd;
+}
+
+
+
 void init_cos_rq(struct cos_rq *cos_rq) 
 {
 	cos_rq->lord = NULL;
 	cos_rq->next_to_sched = NULL;
+	cos_rq->mq = NULL;
 	BUG_ON(rhashtable_init(&cos_rq->task_struct_hash, &task_hash_params));
 	
 }
@@ -23,6 +129,25 @@ void init_cos_rq(struct cos_rq *cos_rq)
 bool task_should_cos(struct task_struct *p)
 {
 	return p->policy == SCHED_COS;
+}
+
+void product_enqueue_msg(struct rq *rq, struct task_struct *p) {
+	if (rq->cos.mq == NULL) {
+		return;
+	}
+	printk("sss\n");
+	rq->cos.mq->data[rq->cos.mq->tail].pid = p->pid;
+	rq->cos.mq->data[rq->cos.mq->tail].type = 1;
+	rq->cos.mq->tail++; // TODO
+}
+
+void product_dequeue_msg(struct rq *rq, struct task_struct *p) {
+	if (rq->cos.mq == NULL) {
+		return;
+	}
+	rq->cos.mq->data[rq->cos.mq->tail].pid = p->pid;
+	rq->cos.mq->data[rq->cos.mq->tail].type = 2;
+	rq->cos.mq->tail++; // TODO
 }
 
 void enqueue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
@@ -37,7 +162,7 @@ void enqueue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 	} else {
 		printk("enqueue_task_cos valid!!!  %d\n", p->pid);
 	}
-
+	product_enqueue_msg(rq, p);
 }
 
 void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
@@ -53,6 +178,7 @@ void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 	} else {
 		printk("dequeue_task_cos valid!!!  %d\n", p->pid);
 	}
+	product_dequeue_msg(rq, p);
 }
 
 void yield_task_cos(struct rq *rq) {
@@ -97,6 +223,10 @@ void task_dead_cos(struct task_struct *p) {
 	rq = cpu_rq(cpu);
 	if (rq->cos.lord == p) {
 		rq->cos.lord = NULL;
+		if (rq->cos.mq) {
+			vfree(rq->cos.mq);
+			rq->cos.mq = NULL;
+		}
 	}
 
 	sched_preempt_enable_no_resched();

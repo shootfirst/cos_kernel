@@ -8025,6 +8025,7 @@ static int do_set_lord(void) {
 	if (likely(p)) {
 		get_task_struct(p);
 	} else {
+		sched_preempt_enable_no_resched();
 		rcu_read_unlock();
 		return -ESRCH;
 	}
@@ -8047,6 +8048,25 @@ static int do_set_lord(void) {
 	sched_preempt_enable_no_resched();
 	// 设置成功，返回
 	return retval;
+}
+
+
+static int do_create_mq(void) 
+{
+	int retval = 0;
+	struct rq *rq;
+	int cpu;
+	preempt_disable();
+
+	// 获取当前运行cpu
+	cpu = smp_processor_id();
+	rq = cpu_rq(cpu);
+
+	int fd = cos_create_queue(&rq->cos);
+
+	sched_preempt_enable_no_resched();
+
+	return fd;
 }
 
 /*
@@ -8130,6 +8150,18 @@ SYSCALL_DEFINE3(sched_setscheduler, pid_t, pid, int, policy, struct sched_param 
 SYSCALL_DEFINE0(set_lord)
 {
 	return do_set_lord();
+}
+
+/**
+ * sys_create_mq
+ * @cpu: the cpu id in question.
+ *
+ * Return: 0 on success. An error code otherwise.
+ */
+// SCHED_CLASS_COS
+SYSCALL_DEFINE0(create_mq)
+{
+	return do_create_mq();
 }
 
 /**
@@ -9981,6 +10013,7 @@ LIST_HEAD(task_groups);
 static struct kmem_cache *task_group_cache __read_mostly;
 #endif
 
+// dzh：初始化
 void __init sched_init(void)
 {
 	unsigned long ptr = 0;

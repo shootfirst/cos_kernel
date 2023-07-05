@@ -1198,6 +1198,7 @@ static inline bool file_mmap_ok(struct file *file, struct inode *inode,
 /*
  * The caller must write-lock current->mm->mmap_lock.
  */
+// dzh：mmap
 unsigned long do_mmap(struct file *file, unsigned long addr,
 			unsigned long len, unsigned long prot,
 			unsigned long flags, unsigned long pgoff,
@@ -1206,13 +1207,12 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 	struct mm_struct *mm = current->mm;
 	vm_flags_t vm_flags;
 	int pkey = 0;
-
+	
 	validate_mm(mm);
 	*populate = 0;
-
 	if (!len)
 		return -EINVAL;
-
+	
 	/*
 	 * Does the application expect PROT_READ to imply PROT_EXEC?
 	 *
@@ -1369,7 +1369,7 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 		if (file && is_file_hugepages(file))
 			vm_flags |= VM_NORESERVE;
 	}
-
+	
 	addr = mmap_region(file, addr, len, vm_flags, pgoff, uf);
 	if (!IS_ERR_VALUE(addr) &&
 	    ((vm_flags & VM_LOCKED) ||
@@ -1377,7 +1377,7 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 		*populate = len;
 	return addr;
 }
-
+// dzh：mmap入口
 unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,
 			      unsigned long prot, unsigned long flags,
 			      unsigned long fd, unsigned long pgoff)
