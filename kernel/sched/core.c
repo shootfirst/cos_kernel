@@ -8044,8 +8044,10 @@ static int do_set_lord(void) {
 
 	// 设置lord为当前线程
 	rq->cos.lord = p; // TODO：线程不安全, --------------------------解锁
-	p->cos.cpu_id = cpu; // 绑核
+	set_lord_cpu(cpu);
+
 	sched_preempt_enable_no_resched();
+	
 	// 设置成功，返回
 	return retval;
 }
@@ -8068,6 +8070,53 @@ static int do_create_mq(void)
 
 	return fd;
 }
+
+void cos_agent_schedule(void)
+{
+	const int cpu = raw_smp_processor_id();
+
+	VM_BUG_ON(this_rq()->cos.lord != current);
+	VM_BUG_ON(current->__state != TASK_RUNNING);
+
+	VM_BUG_ON(preempt_count() != PREEMPT_DISABLE_OFFSET);
+
+	__schedule(false);
+
+	VM_BUG_ON(preempt_count() != PREEMPT_DISABLE_OFFSET);
+
+	VM_BUG_ON(this_rq()->cpu != cpu);
+}
+
+
+static int do_shoot_task(pid_t pid) {
+	int retval = 0;
+	struct task_struct *p;
+	struct rq *rq;
+	int cpu;
+	preempt_disable();
+
+	// 获取当前运行cpu
+	cpu = smp_processor_id();
+	rq = cpu_rq(cpu);
+
+	// 获取目标线程
+	rcu_read_lock();
+	p = find_process_by_pid(pid);
+	if (likely(p)) {
+		get_task_struct(p);
+	} else {
+		sched_preempt_enable_no_resched();
+		rcu_read_unlock();
+		return -ESRCH;
+	}
+	rcu_read_unlock();
+
+	retval = cos_shoot_task(p, rq);
+	sched_preempt_enable_no_resched();
+	return retval;
+}
+
+
 
 /*
  * Mimics kernel/events/core.c perf_copy_attr().
@@ -8162,6 +8211,18 @@ SYSCALL_DEFINE0(set_lord)
 SYSCALL_DEFINE0(create_mq)
 {
 	return do_create_mq();
+}
+
+/**
+ * sys_shoot_task
+ * @cpu: the cpu id in question.
+ *
+ * Return: 0 on success. An error code otherwise.
+ */
+// SCHED_CLASS_COS
+SYSCALL_DEFINE1(shoot_task, pid_t, pid)
+{
+	return do_shoot_task(pid);
 }
 
 /**
@@ -9035,6 +9096,7 @@ EXPORT_SYMBOL(yield);
  *	false (0) if we failed to boost the target.
  *	-ESRCH if there's no task to yield to.
  */
+// dzh：放弃
 int __sched yield_to(struct task_struct *p, bool preempt)
 {
 	struct task_struct *curr = current;

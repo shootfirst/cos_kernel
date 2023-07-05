@@ -13,6 +13,15 @@
 #include <linux/file.h>
 #include <linux/anon_inodes.h>
 
+#include "sched.h"
+
+int lord_cpu = 1;
+
+void set_lord_cpu(int cpu) {
+	lord_cpu = cpu;
+	printk("lord_cpu %d\n", lord_cpu);
+}
+
 static int _cos_mmap_common(struct vm_area_struct *vma, ulong mapsize)
 {
 	static const struct vm_operations_struct cos_vm_ops = {};
@@ -106,10 +115,22 @@ int cos_create_queue(struct cos_rq *cos_rq) {
 		vfree(cos_rq->mq);
 		cos_rq->mq = NULL; //TODO
 	}
-	cos_rq->mq->tail = 1;
-	cos_rq->mq->data[0].pid = 666;
+	// cos_rq->mq->tail = 1;
+	// cos_rq->mq->data[0].pid = 666;
 
 	return fd;
+}
+
+
+int cos_shoot_task(struct task_struct *p, struct rq *rq) {
+	// 将p设为next_to_sched
+	rq->cos.next_to_sched = p;
+
+	// 调用schedule()！！！
+	cos_agent_schedule();
+
+	// 返回，宝贝！！！
+	return 0;
 }
 
 
@@ -152,32 +173,20 @@ void product_dequeue_msg(struct rq *rq, struct task_struct *p) {
 
 void enqueue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 	// rq->cos.lord = p;
-	printk("enqueue_task_cos  %d\n", p->pid);
+	printk("enqueue_task_cos  %d  cpu %d\n", p->pid, task_cpu(p));
 	// 加入哈希表
 	rhashtable_insert_fast(&rq->cos.task_struct_hash, &p->hash_node,
 				     task_hash_params);
-	if (NULL == rhashtable_lookup_fast(&rq->cos.task_struct_hash, &p->pid,
-					      task_hash_params)) {
-		printk("enqueue_task_cos invalid!!!  %d\n", p->pid);
-	} else {
-		printk("enqueue_task_cos valid!!!  %d\n", p->pid);
-	}
 	product_enqueue_msg(rq, p);
 }
 
 void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 	// rq->cos.lord = NULL;
-	printk("dequeue_task_cos  %d\n", p->pid);
+	printk("dequeue_task_cos  %d  cpu %d\n", p->pid, task_cpu(p));
 	// 从哈希表中移除，若是next_to_sched，将其置为空指针
 	rhashtable_remove_fast(&rq->cos.task_struct_hash, &p->hash_node, task_hash_params);
 	if (rq->cos.next_to_sched == p) 
 		rq->cos.next_to_sched = NULL;
-	if (NULL != rhashtable_lookup_fast(&rq->cos.task_struct_hash, &p->pid,
-					      task_hash_params)) {
-		printk("dequeue_task_cos invalid!!!  %d\n", p->pid);
-	} else {
-		printk("dequeue_task_cos valid!!!  %d\n", p->pid);
-	}
 	product_dequeue_msg(rq, p);
 }
 
@@ -196,14 +205,13 @@ void check_preempt_curr_cos(struct rq *rq, struct task_struct *p, int flags) {
 
 struct task_struct *pick_next_task_cos(struct rq *rq) {
 	// printk("hello\n");
-	if (rq->cos.lord == NULL) {
-		return NULL;
+	if (rq->cos.next_to_sched != NULL) {
+		return rq->cos.next_to_sched;
 	}
-	if (task_is_running(rq->cos.lord)) {
+	if (rq->cos.lord != NULL && task_is_running(rq->cos.lord)) {
 		return rq->cos.lord;
 	}
 	return NULL;
-	
 }
 
 void put_prev_task_cos(struct rq *rq, struct task_struct *p) {
@@ -238,8 +246,8 @@ int balance_cos(struct rq *rq, struct task_struct *prev, struct rq_flags *rf) {
 }
 
 int select_task_rq_cos(struct task_struct *p, int task_cpu, int flags) {
-	printk("select_task_rq_cos\n");
-	return p->cos.cpu_id;
+	printk("select_task_rq_cos, lord_cpu %d\n", lord_cpu);
+	return lord_cpu;
 }
 
 void set_cpus_allowed_cos(struct task_struct *p, struct affinity_context *ctx) {
@@ -260,7 +268,7 @@ struct task_struct * pick_task_cos(struct rq *rq) {
 }
 
 void task_tick_cos(struct rq *rq, struct task_struct *p, int queued) {
-	printk("task_tick_cos\n");
+	// printk("task_tick_cos\n");
 }
 
 void switched_to_cos(struct rq *this_rq, struct task_struct *task) {

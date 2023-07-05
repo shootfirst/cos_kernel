@@ -3504,5 +3504,6 @@ static inline void init_sched_mm_cid(struct task_struct *t) { }
 
 // SCHED_CLASS_COS
 #include "cos.h"
+void cos_agent_schedule(void);
 
 #endif /* _KERNEL_SCHED_SCHED_H */

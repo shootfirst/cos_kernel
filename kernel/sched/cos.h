@@ -16,10 +16,14 @@ struct cos_message_queue {
 	struct msg data[511];
 };
 
+
+
 extern const struct sched_class cos_sched_class;
 
 bool task_should_cos(struct task_struct *p);
+void set_lord_cpu(int cpu);
 int cos_create_queue(struct cos_rq *cos_rq);
+int cos_shoot_task(struct task_struct *p, struct rq *rq);
 
 
 

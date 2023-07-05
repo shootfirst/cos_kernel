@@ -716,6 +716,7 @@ asmlinkage long sys_sched_rr_get_interval_time32(pid_t pid,
 // SCHED_CLASS_COS
 asmlinkage long sys_set_lord();
 asmlinkage long sys_create_mq();
+asmlinkage long shoot_task(pid_t pid);
 
 /* kernel/signal.c */
 asmlinkage long sys_restart_syscall(void);
