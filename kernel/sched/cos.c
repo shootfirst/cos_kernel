@@ -127,7 +127,7 @@ int cos_shoot_task(struct task_struct *p, struct rq *rq) {
 	rq->cos.next_to_sched = p;
 
 	// 调用schedule()！！！
-	cos_agent_schedule();
+	cos_agent_schedule(rq);
 
 	// 返回，宝贝！！！
 	return 0;
@@ -140,6 +140,7 @@ void init_cos_rq(struct cos_rq *cos_rq)
 	cos_rq->lord = NULL;
 	cos_rq->next_to_sched = NULL;
 	cos_rq->mq = NULL;
+	cos_rq->lord_on_rq = 0;
 	BUG_ON(rhashtable_init(&cos_rq->task_struct_hash, &task_hash_params));
 	
 }
@@ -204,7 +205,6 @@ void check_preempt_curr_cos(struct rq *rq, struct task_struct *p, int flags) {
 }
 
 struct task_struct *pick_next_task_cos(struct rq *rq) {
-	// printk("hello\n");
 	if (rq->cos.next_to_sched != NULL) {
 		return rq->cos.next_to_sched;
 	}
@@ -231,6 +231,7 @@ void task_dead_cos(struct task_struct *p) {
 	rq = cpu_rq(cpu);
 	if (rq->cos.lord == p) {
 		rq->cos.lord = NULL;
+		rq->cos.lord_on_rq = 0;
 		if (rq->cos.mq) {
 			vfree(rq->cos.mq);
 			rq->cos.mq = NULL;
@@ -242,7 +243,7 @@ void task_dead_cos(struct task_struct *p) {
 
 int balance_cos(struct rq *rq, struct task_struct *prev, struct rq_flags *rf) {
 	// printk("balance_cos\n");
-	return 1;
+	return 0;
 }
 
 int select_task_rq_cos(struct task_struct *p, int task_cpu, int flags) {
@@ -335,6 +336,26 @@ DEFINE_SCHED_CLASS(cos) = {
 
 #ifdef CONFIG_UCLAMP_TASK
 	.uclamp_enabled		= 0,
+#endif
+};
+
+struct task_struct *pick_next_task_cos_lord(struct rq *rq) {
+	// lord不为空 lord可以运行 lord此时没有处于shoot负载的状态
+	if (rq->cos.lord != NULL && task_is_running(rq->cos.lord) && rq->cos.lord_on_rq != 0) {
+		return rq->cos.lord;
+	}
+	return NULL;
+}
+
+int balance_cos_lord(struct rq *rq, struct task_struct *prev, struct rq_flags *rf) {
+	return 0;
+}
+
+
+DEFINE_SCHED_CLASS(cos_lord) = {
+	.pick_next_task		= pick_next_task_cos_lord,
+#ifdef CONFIG_SMP
+	.balance		= balance_cos_lord,
 #endif
 };
 

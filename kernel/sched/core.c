@@ -2198,12 +2198,28 @@ static inline void check_class_changed(struct rq *rq, struct task_struct *p,
 		p->sched_class->prio_changed(rq, p, oldprio);
 }
 
+// dzh：检测能否抢占当前线程
 void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags)
 {
 	if (p->sched_class == rq->curr->sched_class)
 		rq->curr->sched_class->check_preempt_curr(rq, p, flags);
 	else if (sched_class_above(p->sched_class, rq->curr->sched_class))
 		resched_curr(rq);
+
+// #ifdef CONFIG_SCHED_CLASS_COS
+	else if (sched_class_above(&cos_lord_sched_class, rq->curr->sched_class) &&
+		 is_lord(rq, p)) {
+		/*
+		 * Normally, ghost threads have the lowest
+		 * priority. The ghost agent thread, however, is
+		 * allowed to run in the higher priority ghost
+		 * agent class when it would otherwise be
+		 * preempted by another sched_class. See
+		 * GHOST_SW_BOOST_PRIO for more details.
+		 */
+		resched_curr(rq);
+	}
+// #endif
 
 	/*
 	 * A queue event has occurred, and we're going to schedule.  In
@@ -8044,6 +8060,7 @@ static int do_set_lord(void) {
 
 	// 设置lord为当前线程
 	rq->cos.lord = p; // TODO：线程不安全, --------------------------解锁
+	rq->cos.lord_on_rq = 1;
 	set_lord_cpu(cpu);
 
 	sched_preempt_enable_no_resched();
@@ -8071,7 +8088,7 @@ static int do_create_mq(void)
 	return fd;
 }
 
-void cos_agent_schedule(void)
+void cos_agent_schedule(struct rq *rq)
 {
 	const int cpu = raw_smp_processor_id();
 
@@ -8079,8 +8096,11 @@ void cos_agent_schedule(void)
 	VM_BUG_ON(current->__state != TASK_RUNNING);
 
 	VM_BUG_ON(preempt_count() != PREEMPT_DISABLE_OFFSET);
+	rq->cos.lord_on_rq = 0;
 
 	__schedule(false);
+
+	rq->cos.lord_on_rq = 1;
 
 	VM_BUG_ON(preempt_count() != PREEMPT_DISABLE_OFFSET);
 
@@ -10088,7 +10108,9 @@ void __init sched_init(void)
 	       &fair_sched_class != &rt_sched_class + 1 ||
 	       &rt_sched_class   != &dl_sched_class + 1);
 #ifdef CONFIG_SMP
-	BUG_ON(&dl_sched_class != &stop_sched_class + 1);
+// SCHED_CLASS_COS
+	BUG_ON(&dl_sched_class != &cos_lord_sched_class + 1 ||
+		   &cos_lord_sched_class != &stop_sched_class + 1);
 #endif
 
 	wait_bit_init();

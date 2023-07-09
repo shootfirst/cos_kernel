@@ -129,6 +129,7 @@
 	STRUCT_ALIGN();				\
 	__sched_class_highest = .;		\
 	*(__stop_sched_class)			\
+	*(__cos_lord_sched_class)		\
 	*(__dl_sched_class)			\
 	*(__rt_sched_class)			\
 	*(__fair_sched_class)			\
