@@ -4031,6 +4031,7 @@ static inline bool ttwu_queue_wakelist(struct task_struct *p, int cpu, int wake_
 
 #endif /* CONFIG_SMP */
 
+// dzh：唤醒
 static void ttwu_queue(struct task_struct *p, int cpu, int wake_flags)
 {
 	struct rq *rq = cpu_rq(cpu);
@@ -4211,6 +4212,7 @@ bool ttwu_state_match(struct task_struct *p, unsigned int state, int *success)
  * Return: %true if @p->state changes (an actual wakeup was done),
  *	   %false otherwise.
  */
+// dzh：唤醒
 static int
 try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 {
@@ -4309,6 +4311,7 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	 * TASK_WAKING such that we can unlock p->pi_lock before doing the
 	 * enqueue, such as ttwu_queue_wakelist().
 	 */
+	// dzh：dzh：
 	WRITE_ONCE(p->__state, TASK_WAKING);
 
 	/*
@@ -4367,6 +4370,9 @@ out:
 	if (success)
 		ttwu_stat(p, task_cpu(p), wake_flags);
 	preempt_enable();
+	// ddd
+	// if (p->pid > 2200)
+	// 			printk("111111116 %d %d\n", p->pid, p->__state);
 
 	return success;
 }
@@ -6018,14 +6024,14 @@ __pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 {
 	const struct sched_class *class;
 	struct task_struct *p;
-
+	int impossilbe = 1;
 	/*
 	 * Optimization: we know that if all tasks are in the fair class we can
 	 * call that function directly, but only if the @prev task wasn't of a
 	 * higher scheduling class, because otherwise those lose the
 	 * opportunity to pull in more work from other CPUs.
 	 */
-	if (likely(!sched_class_above(prev->sched_class, &fair_sched_class) &&
+	if (likely(impossilbe && !sched_class_above(prev->sched_class, &fair_sched_class) &&
 		   rq->nr_running == rq->cfs.h_nr_running)) {
 
 		p = pick_next_task_fair(rq, prev, rf);
@@ -6691,6 +6697,12 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 	}
 
 	next = pick_next_task(rq, prev, &rf);
+	// ddd
+	// if (next->comm[0] == 'g' && next->comm[1] == 'o' && next->comm[2] == 'o' && next->comm[3] == 'd') {
+	// 	dump_stack();
+	// 	printk("crycry\n");
+	// }
+		
 	clear_tsk_need_resched(prev);
 	clear_preempt_need_resched();
 #ifdef CONFIG_SCHED_DEBUG
@@ -8109,6 +8121,7 @@ void cos_agent_schedule(struct rq *rq)
 
 
 static int do_shoot_task(pid_t pid) {
+	printk("shoot task start!\n");
 	int retval = 0;
 	struct task_struct *p;
 	struct rq *rq;
@@ -8308,6 +8321,7 @@ SYSCALL_DEFINE3(sched_setattr, pid_t, pid, struct sched_attr __user *, uattr,
  */
 SYSCALL_DEFINE1(sched_getscheduler, pid_t, pid)
 {
+	printk("sched_getscheduler start!\n");
 	struct task_struct *p;
 	int retval;
 
@@ -10103,9 +10117,13 @@ void __init sched_init(void)
 
 	/* Make sure the linker didn't screw up */
 	// SCHED_CLASS_COS
-	BUG_ON(&idle_sched_class != &cos_sched_class + 1 ||
-		   &cos_sched_class != &fair_sched_class + 1 ||
-	       &fair_sched_class != &rt_sched_class + 1 ||
+	// BUG_ON(&idle_sched_class != &cos_sched_class + 1 ||
+	// 	   &cos_sched_class != &fair_sched_class + 1 ||
+	//        &fair_sched_class != &rt_sched_class + 1 ||
+	//        &rt_sched_class   != &dl_sched_class + 1);
+	BUG_ON(&idle_sched_class != &fair_sched_class + 1 ||
+		   &fair_sched_class != &cos_sched_class + 1 ||
+	       &cos_sched_class != &rt_sched_class + 1 ||
 	       &rt_sched_class   != &dl_sched_class + 1);
 #ifdef CONFIG_SMP
 // SCHED_CLASS_COS

@@ -13,6 +13,7 @@
 #include <linux/file.h>
 #include <linux/anon_inodes.h>
 
+// #include <asm/ptrace.h>
 #include "sched.h"
 
 int lord_cpu = 1;
@@ -154,7 +155,7 @@ bool task_should_cos(struct task_struct *p)
 }
 
 void product_enqueue_msg(struct rq *rq, struct task_struct *p) {
-	if (rq->cos.mq == NULL) {
+	if (p == rq->cos.lord || rq->cos.mq == NULL) {
 		return;
 	}
 	printk("sss\n");
@@ -164,7 +165,7 @@ void product_enqueue_msg(struct rq *rq, struct task_struct *p) {
 }
 
 void product_dequeue_msg(struct rq *rq, struct task_struct *p) {
-	if (rq->cos.mq == NULL) {
+	if (p == rq->cos.lord || rq->cos.mq == NULL) {
 		return;
 	}
 	rq->cos.mq->data[rq->cos.mq->tail].pid = p->pid;
@@ -176,8 +177,13 @@ void enqueue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 	// rq->cos.lord = p;
 	printk("enqueue_task_cos  %d  cpu %d\n", p->pid, task_cpu(p));
 	// 加入哈希表
-	rhashtable_insert_fast(&rq->cos.task_struct_hash, &p->hash_node,
-				     task_hash_params);
+	// rhashtable_insert_fast(&rq->cos.task_struct_hash, &p->hash_node,
+	// 			     task_hash_params);
+	if (p == rq->cos.lord) {
+		rq->cos.lord_on_rq = 1;
+		// 666
+		// printk("shizheli! %d %d\n", rq->cos.lord_on_rq, p->__state);
+	}
 	product_enqueue_msg(rq, p);
 }
 
@@ -185,9 +191,12 @@ void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 	// rq->cos.lord = NULL;
 	printk("dequeue_task_cos  %d  cpu %d\n", p->pid, task_cpu(p));
 	// 从哈希表中移除，若是next_to_sched，将其置为空指针
-	rhashtable_remove_fast(&rq->cos.task_struct_hash, &p->hash_node, task_hash_params);
+	// rhashtable_remove_fast(&rq->cos.task_struct_hash, &p->hash_node, task_hash_params);
 	if (rq->cos.next_to_sched == p) 
 		rq->cos.next_to_sched = NULL;
+	if (p == rq->cos.lord) {
+		rq->cos.lord_on_rq = 0;
+	}
 	product_dequeue_msg(rq, p);
 }
 
@@ -215,11 +224,11 @@ struct task_struct *pick_next_task_cos(struct rq *rq) {
 }
 
 void put_prev_task_cos(struct rq *rq, struct task_struct *p) {
-	printk("put_prev_task_cos\n");
+	// printk("put_prev_task_cos\n");
 }
 
 void set_next_task_cos(struct rq *rq, struct task_struct *p, bool first) {
-	printk("set_next_task_cos\n");
+	// printk("set_next_task_cos\n");
 }
 
 void task_dead_cos(struct task_struct *p) {
@@ -341,7 +350,13 @@ DEFINE_SCHED_CLASS(cos) = {
 
 struct task_struct *pick_next_task_cos_lord(struct rq *rq) {
 	// lord不为空 lord可以运行 lord此时没有处于shoot负载的状态
-	if (rq->cos.lord != NULL && task_is_running(rq->cos.lord) && rq->cos.lord_on_rq != 0) {
+	if (smp_processor_id() == lord_cpu) {
+		// 666
+		// printk("aaaaaaaaaa\n");
+	}
+	if (rq->cos.lord != NULL && (task_is_running(rq->cos.lord) || rq->cos.lord->__state, TASK_WAKING) && rq->cos.lord_on_rq != 0) {
+		// 666
+		// printk("dzhdzhdzh\n");
 		return rq->cos.lord;
 	}
 	return NULL;
