@@ -3166,6 +3166,8 @@ static int __set_cpus_allowed_ptr_locked(struct task_struct *p,
 	 */
 	dest_cpu = cpumask_any_and_distribute(cpu_valid_mask, ctx->new_mask);
 	if (dest_cpu >= nr_cpu_ids) {
+		printk("cpu_valid_mask %llx, ctx->new_mask %llx\n", cpu_valid_mask, ctx->new_mask);
+		printk("eee %d\n", p->pid);
 		ret = -EINVAL;
 		goto out;
 	}
@@ -8036,46 +8038,50 @@ do_sched_setscheduler(pid_t pid, int policy, struct sched_param __user *param)
 	return retval;
 }
 // SCHED_CLASS_COS
-static int do_set_lord(void) {
+static int do_set_lord(int cpu_id) {
 	int retval = 0;
-	struct task_struct *p;
+	struct task_struct *p = current;
 	struct rq *rq;
-	int cpu;
-	preempt_disable();
+	// int cpu;
+	retval = cos_do_set_lord_cpu(cpu_id);
+	if (retval != 0) 
+		return retval;
+	// preempt_disable();
 
-	// 获取当前运行cpu
-	cpu = smp_processor_id();
-	rq = cpu_rq(cpu);
+	// // 获取当前运行cpu
+	// cpu = smp_processor_id();
+	// rq = cpu_rq(cpu);
 
 	// 获取当前线程
-	rcu_read_lock();
-	p = find_process_by_pid(0);
-	if (likely(p)) {
-		get_task_struct(p);
-	} else {
-		sched_preempt_enable_no_resched();
-		rcu_read_unlock();
-		return -ESRCH;
-	}
-	rcu_read_unlock();
+	// rcu_read_lock();
+	// p = find_process_by_pid(0);
+	// if (likely(p)) {
+	// 	get_task_struct(p);
+	// } else {
+	// 	sched_preempt_enable_no_resched();
+	// 	rcu_read_unlock();
+	// 	return -ESRCH;
+	// }
+	// rcu_read_unlock();
 
 	// 设置调度类为cos
 	struct sched_param param = {
 		.sched_priority = 0,
 	};
-	if (likely(p)) {
-		retval = sched_setscheduler(p, SCHED_COS, &param);
-		put_task_struct(p);
-	}
+	// if (likely(p)) {
+	retval = sched_setscheduler(p, SCHED_COS, &param);
+		// put_task_struct(p);
+	// }
 	if (retval != 0) 
 		return retval;
 
 	// 设置lord为当前线程
+	rq = cpu_rq(cpu_id);
 	rq->cos.lord = p; // TODO：线程不安全, --------------------------解锁
 	rq->cos.lord_on_rq = 1;
-	set_lord_cpu(cpu);
+	set_lord_cpu(cpu_id);
 
-	sched_preempt_enable_no_resched();
+	// sched_preempt_enable_no_resched();
 	
 	// 设置成功，返回
 	return retval;
@@ -8147,6 +8153,17 @@ static int do_shoot_task(pid_t pid) {
 	retval = cos_shoot_task(p, rq);
 	sched_preempt_enable_no_resched();
 	return retval;
+}
+
+// SCHED_CLASS_COS
+int cos_set_cpus_allowed(struct task_struct *p, const struct cpumask *mask)
+{
+	struct affinity_context ac;
+	ac = (struct affinity_context){
+		.new_mask  = mask,
+		.flags     = true,
+	};
+	return __set_cpus_allowed_ptr(p, &ac);
 }
 
 
@@ -8229,9 +8246,9 @@ SYSCALL_DEFINE3(sched_setscheduler, pid_t, pid, int, policy, struct sched_param 
  * Return: 0 on success. An error code otherwise.
  */
 // SCHED_CLASS_COS
-SYSCALL_DEFINE0(set_lord)
+SYSCALL_DEFINE1(set_lord, int, cpu_id)
 {
-	return do_set_lord();
+	return do_set_lord(cpu_id);
 }
 
 /**
@@ -8563,7 +8580,7 @@ out_free_cpus_allowed:
 	free_cpumask_var(cpus_allowed);
 	return retval;
 }
-
+// dzh：
 long sched_setaffinity(pid_t pid, const struct cpumask *in_mask)
 {
 	struct affinity_context ac;

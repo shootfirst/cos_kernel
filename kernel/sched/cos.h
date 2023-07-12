@@ -21,6 +21,7 @@ struct cos_message_queue {
 extern const struct sched_class cos_sched_class;
 extern const struct sched_class cos_lord_sched_class;
 
+int cos_do_set_lord_cpu(int cpu_id);
 bool task_should_cos(struct task_struct *p);
 void set_lord_cpu(int cpu);
 int cos_create_queue(struct cos_rq *cos_rq);

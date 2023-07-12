@@ -23,6 +23,24 @@ void set_lord_cpu(int cpu) {
 	printk("lord_cpu %d\n", lord_cpu);
 }
 
+int cos_do_set_lord_cpu(int cpu_id) {
+	cpumask_var_t new_mask;
+	int ret;
+	
+	if (cpu_id < 0 || cpu_id >= nr_cpu_ids)
+		return -EINVAL;
+
+	if (!zalloc_cpumask_var(&new_mask, GFP_KERNEL)) {
+		return -ENOMEM;
+	}
+
+	cpumask_set_cpu(cpu_id, new_mask);
+	ret = cos_set_cpus_allowed(current, new_mask);
+	free_cpumask_var(new_mask);
+
+	return ret;
+}
+
 static int _cos_mmap_common(struct vm_area_struct *vma, ulong mapsize)
 {
 	static const struct vm_operations_struct cos_vm_ops = {};

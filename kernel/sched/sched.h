@@ -2856,6 +2856,7 @@ extern void init_rt_rq(struct rt_rq *rt_rq);
 extern void init_dl_rq(struct dl_rq *dl_rq);
 // SCHED_CLASS_COS
 extern void init_cos_rq(struct cos_rq *cos_rq);
+int cos_set_cpus_allowed(struct task_struct *p, const struct cpumask *mask);
 
 extern void cfs_bandwidth_usage_inc(void);
 extern void cfs_bandwidth_usage_dec(void);
