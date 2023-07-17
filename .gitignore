@@ -174,3 +174,7 @@ sphinx_*/
 
 # Rust analyzer configuration
 /rust-project.json
+
+# for cos userspace
+good*
+log*

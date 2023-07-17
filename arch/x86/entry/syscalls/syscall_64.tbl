@@ -376,11 +376,7 @@
 
 # SCHED_CLASS_COS
 452 common  set_lord    sys_set_lord
-
-# SCHED_CLASS_COS
 453 common  create_mq    sys_create_mq
-
-# SCHED_CLASS_COS
 454 common  shoot_task    sys_shoot_task
 
 #

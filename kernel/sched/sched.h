@@ -659,10 +659,8 @@ struct cos_rq {
 	struct task_struct *lord;
 	unsigned int lord_on_rq;
 	struct task_struct *next_to_sched; // return in pick_next_task
-	struct rhashtable task_struct_hash;
 	struct cos_message_queue *mq;
 };
-// #endif /* CONFIG_SCHED_CLASS_COS */
 
 static inline int rt_bandwidth_enabled(void)
 {
@@ -1227,16 +1225,6 @@ DECLARE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
 #define task_rq(p)		cpu_rq(task_cpu(p))
 #define cpu_curr(cpu)		(cpu_rq(cpu)->curr)
 #define raw_rq()		raw_cpu_ptr(&runqueues)
-
-// SCHED_CLASS_COS
-static inline bool is_lord(struct rq *rq, struct task_struct *p)
-{
-	if (rq->cos.lord == p) {
-		return true;
-	}
-
-	return false;
-}
 
 struct sched_group;
 #ifdef CONFIG_SCHED_CORE
@@ -2856,7 +2844,6 @@ extern void init_rt_rq(struct rt_rq *rt_rq);
 extern void init_dl_rq(struct dl_rq *dl_rq);
 // SCHED_CLASS_COS
 extern void init_cos_rq(struct cos_rq *cos_rq);
-int cos_set_cpus_allowed(struct task_struct *p, const struct cpumask *mask);
 
 extern void cfs_bandwidth_usage_inc(void);
 extern void cfs_bandwidth_usage_dec(void);
@@ -3516,6 +3503,8 @@ static inline void init_sched_mm_cid(struct task_struct *t) { }
 
 // SCHED_CLASS_COS
 #include "cos.h"
+// cos.c需要使用core.c中定义的cos相关函数
+int cos_set_cpus_allowed(struct task_struct *p, const struct cpumask *mask);
 void cos_agent_schedule(struct rq *rq);
 
 #endif /* _KERNEL_SCHED_SCHED_H */

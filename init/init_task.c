@@ -103,13 +103,6 @@ struct task_struct init_task
 	.sched_task_group = &root_task_group,
 // #ifdef CONFIG_SCHED_CLASS_COS
 	.cos		= {
-		// .dsq_node.fifo	= LIST_HEAD_INIT(init_task.scx.dsq_node.fifo),
-		// .watchdog_node	= LIST_HEAD_INIT(init_task.scx.watchdog_node),
-		// .sticky_cpu	= -1,
-		// .holding_cpu	= -1,
-		// .ops_state	= ATOMIC_INIT(0),
-		// .runnable_at	= INITIAL_JIFFIES,
-		.slice		= 0,
 		.cpu_id     = 1,
 	},
 // #endif

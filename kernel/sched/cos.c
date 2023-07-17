@@ -16,14 +16,29 @@
 // #include <asm/ptrace.h>
 #include "sched.h"
 
+// =======================================全局变量===========================================
+
 int lord_cpu = 1;
 
-void set_lord_cpu(int cpu) {
-	lord_cpu = cpu;
-	printk("lord_cpu %d\n", lord_cpu);
-}
+// =====================================全局变量结束=========================================
 
-int cos_do_set_lord_cpu(int cpu_id) {
+// =====================================core.c=============================================
+/**
+ * find_process_by_pid - find a process with a matching PID value.
+ * used in sys_sched_set/getaffinity() in kernel/sched/core.c, so
+ * cloned here.
+ */
+static struct task_struct *find_process_by_pid(pid_t pid)
+{
+	return pid ? find_task_by_vpid(pid) : current;
+}
+// =====================================core.c=============================================
+
+
+// =====================================系统调用函数=========================================
+//=====================================lord=======================================
+int cos_do_set_lord_cpu(int cpu_id) 
+{
 	cpumask_var_t new_mask;
 	int ret;
 	
@@ -41,6 +56,47 @@ int cos_do_set_lord_cpu(int cpu_id) {
 	return ret;
 }
 
+void set_lord_cpu(int cpu) 
+{
+	lord_cpu = cpu;
+	printk("lord_cpu %d\n", lord_cpu);
+}
+
+int cos_do_set_lord(int cpu_id) 
+{
+	int retval = 0;
+	struct task_struct *p = current;
+	struct rq *rq;
+	// int cpu;
+	retval = cos_do_set_lord_cpu(cpu_id);
+	if (retval != 0) 
+		return retval;
+	
+	struct sched_param param = {
+		.sched_priority = 0,
+	};
+	// if (likely(p)) {
+	retval = sched_setscheduler(p, SCHED_COS, &param);
+		// put_task_struct(p);
+	// }
+	if (retval != 0) 
+		return retval;
+
+	// 设置lord为当前线程
+	rq = cpu_rq(cpu_id);
+	rq->cos.lord = p; // TODO：线程不安全, --------------------------解锁
+	rq->cos.lord_on_rq = 1;
+	set_lord_cpu(cpu_id);
+
+	// sched_preempt_enable_no_resched();
+	
+	// 设置成功，返回
+	return retval;
+}
+
+//=====================================lord=======================================
+
+//=====================================mq=========================================
 static int _cos_mmap_common(struct vm_area_struct *vma, ulong mapsize)
 {
 	static const struct vm_operations_struct cos_vm_ops = {};
@@ -67,10 +123,10 @@ static int _cos_mmap_common(struct vm_area_struct *vma, ulong mapsize)
 	if (vma->vm_pgoff)
 		return -EINVAL;
 
-	if (vma->vm_end - vma->vm_start != mapsize) {
-		printk("vma->vm_end %llu - vma->vm_start%llu = %llu != size %d\n", vma->vm_end, vma->vm_start, vma->vm_end- vma->vm_start, mapsize);
-		return -EINVAL;
-	}
+	// if (vma->vm_end - vma->vm_start != mapsize) {
+	// 	printk("vma->vm_end %llu - vma->vm_start%llu = %llu != size %d\n", vma->vm_end, vma->vm_start, vma->vm_end- vma->vm_start, mapsize);
+	// 	return -EINVAL;
+	// }
 		
 
 	/*
@@ -120,7 +176,8 @@ static const struct file_operations queue_fops = {
 	.mmap			= queue_mmap,
 };
 
-int cos_create_queue(struct cos_rq *cos_rq) {
+int cos_create_queue(struct cos_rq *cos_rq) 
+{
 	cos_rq->mq = vmalloc_user(sizeof(struct cos_message_queue));
 
 	if (!cos_rq->mq) {
@@ -140,8 +197,29 @@ int cos_create_queue(struct cos_rq *cos_rq) {
 	return fd;
 }
 
+int cos_do_create_mq(void) 
+{
+	int retval = 0;
+	struct rq *rq;
+	int cpu;
+	preempt_disable();
 
-int cos_shoot_task(struct task_struct *p, struct rq *rq) {
+	// 获取当前运行cpu
+	cpu = smp_processor_id();
+	rq = cpu_rq(cpu);
+
+	int fd = cos_create_queue(&rq->cos);
+
+	sched_preempt_enable_no_resched();
+
+	return fd;
+}
+
+//=====================================mq=========================================
+
+//============================================shoot=======================================================
+int cos_shoot_task(struct task_struct *p, struct rq *rq) 
+{
 	// 将p设为next_to_sched
 	rq->cos.next_to_sched = p;
 
@@ -153,6 +231,40 @@ int cos_shoot_task(struct task_struct *p, struct rq *rq) {
 }
 
 
+int cos_do_shoot_task(pid_t pid) 
+{
+	printk("shoot task start! %d\n", pid);
+	int retval = 0;
+	struct task_struct *p;
+	struct rq *rq;
+	int cpu;
+	preempt_disable();
+
+	// 获取当前运行cpu
+	cpu = smp_processor_id();
+	rq = cpu_rq(cpu);
+
+	// 获取目标线程
+	rcu_read_lock();
+	p = find_process_by_pid(pid);
+	if (likely(p)) {
+		get_task_struct(p);
+	} else {
+		sched_preempt_enable_no_resched();
+		rcu_read_unlock();
+		return -ESRCH;
+	}
+	rcu_read_unlock();
+
+	retval = cos_shoot_task(p, rq);
+	sched_preempt_enable_no_resched();
+	return retval;
+}
+//============================================shoot=======================================================
+
+//====================================系统调用函数结束=======================================
+
+//==================================供core.c使用的函数=====================================
 
 void init_cos_rq(struct cos_rq *cos_rq) 
 {
@@ -160,17 +272,20 @@ void init_cos_rq(struct cos_rq *cos_rq)
 	cos_rq->next_to_sched = NULL;
 	cos_rq->mq = NULL;
 	cos_rq->lord_on_rq = 0;
-	BUG_ON(rhashtable_init(&cos_rq->task_struct_hash, &task_hash_params));
-	
 }
-/*
- * Used by sched_fork() and __setscheduler_prio() to pick the matching
- * sched_class. dl/rt are already handled.
- */
-bool task_should_cos(struct task_struct *p)
+
+bool is_lord(struct rq *rq, struct task_struct *p)
 {
-	return p->policy == SCHED_COS;
+	if (rq->cos.lord == p) {
+		return true;
+	}
+
+	return false;
 }
+
+//==================================供core.c使用的函数=====================================
+
+//==================================消息队列函数=====================================
 
 void product_enqueue_msg(struct rq *rq, struct task_struct *p) {
 	if (p == rq->cos.lord || rq->cos.mq == NULL) {
@@ -191,12 +306,13 @@ void product_dequeue_msg(struct rq *rq, struct task_struct *p) {
 	rq->cos.mq->tail++; // TODO
 }
 
+//==================================消息队列函数结束=====================================
+
+//==================================cos调度类钩子函数=====================================
+
 void enqueue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 	// rq->cos.lord = p;
 	printk("enqueue_task_cos  %d  cpu %d\n", p->pid, task_cpu(p));
-	// 加入哈希表
-	// rhashtable_insert_fast(&rq->cos.task_struct_hash, &p->hash_node,
-	// 			     task_hash_params);
 	if (p == rq->cos.lord) {
 		rq->cos.lord_on_rq = 1;
 		// 666
@@ -208,27 +324,12 @@ void enqueue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 	// rq->cos.lord = NULL;
 	printk("dequeue_task_cos  %d  cpu %d\n", p->pid, task_cpu(p));
-	// 从哈希表中移除，若是next_to_sched，将其置为空指针
-	// rhashtable_remove_fast(&rq->cos.task_struct_hash, &p->hash_node, task_hash_params);
 	if (rq->cos.next_to_sched == p) 
 		rq->cos.next_to_sched = NULL;
 	if (p == rq->cos.lord) {
 		rq->cos.lord_on_rq = 0;
 	}
 	product_dequeue_msg(rq, p);
-}
-
-void yield_task_cos(struct rq *rq) {
-	printk("yield_task_cos\n");
-}
-
-bool yield_to_task_cos(struct rq *rq, struct task_struct *p) {
-	printk("yield_to_task_cos\n");
-	return false;
-}
-
-void check_preempt_curr_cos(struct rq *rq, struct task_struct *p, int flags) {
-	printk("check_preempt_curr_cos\n");
 }
 
 struct task_struct *pick_next_task_cos(struct rq *rq) {
@@ -239,14 +340,6 @@ struct task_struct *pick_next_task_cos(struct rq *rq) {
 		return rq->cos.lord;
 	}
 	return NULL;
-}
-
-void put_prev_task_cos(struct rq *rq, struct task_struct *p) {
-	// printk("put_prev_task_cos\n");
-}
-
-void set_next_task_cos(struct rq *rq, struct task_struct *p, bool first) {
-	// printk("set_next_task_cos\n");
 }
 
 void task_dead_cos(struct task_struct *p) {
@@ -266,6 +359,27 @@ void task_dead_cos(struct task_struct *p) {
 	}
 
 	sched_preempt_enable_no_resched();
+}
+
+void yield_task_cos(struct rq *rq) {
+	printk("yield_task_cos\n");
+}
+
+bool yield_to_task_cos(struct rq *rq, struct task_struct *p) {
+	printk("yield_to_task_cos\n");
+	return false;
+}
+
+void check_preempt_curr_cos(struct rq *rq, struct task_struct *p, int flags) {
+	printk("check_preempt_curr_cos\n");
+}
+
+void put_prev_task_cos(struct rq *rq, struct task_struct *p) {
+	// printk("put_prev_task_cos\n");
+}
+
+void set_next_task_cos(struct rq *rq, struct task_struct *p, bool first) {
+	// printk("set_next_task_cos\n");
 }
 
 int balance_cos(struct rq *rq, struct task_struct *prev, struct rq_flags *rf) {
@@ -366,6 +480,10 @@ DEFINE_SCHED_CLASS(cos) = {
 #endif
 };
 
+//==================================cos调度类钩子函数结束=====================================
+
+//==================================cos lord调度类钩子函数=====================================
+
 struct task_struct *pick_next_task_cos_lord(struct rq *rq) {
 	// lord不为空 lord可以运行 lord此时没有处于shoot负载的状态
 	if (smp_processor_id() == lord_cpu) {
@@ -391,6 +509,8 @@ DEFINE_SCHED_CLASS(cos_lord) = {
 	.balance		= balance_cos_lord,
 #endif
 };
+
+//==================================cos lord调度类钩子函数结束=====================================
 
 
 

@@ -2210,12 +2210,11 @@ void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags)
 	else if (sched_class_above(&cos_lord_sched_class, rq->curr->sched_class) &&
 		 is_lord(rq, p)) {
 		/*
-		 * Normally, ghost threads have the lowest
-		 * priority. The ghost agent thread, however, is
-		 * allowed to run in the higher priority ghost
-		 * agent class when it would otherwise be
-		 * preempted by another sched_class. See
-		 * GHOST_SW_BOOST_PRIO for more details.
+		 * Normally, cos threads have the lowest
+		 * priority. The cos lord thread, however, is
+		 * allowed to run in the higher priority cos
+		 * lord class when it would otherwise be
+		 * preempted by another sched_class. 
 		 */
 		resched_curr(rq);
 	}
@@ -7076,12 +7075,13 @@ static void __setscheduler_prio(struct task_struct *p, int prio)
 	else if (rt_prio(prio))
 		p->sched_class = &rt_sched_class;
 // #ifdef CONFIG_SCHED_CLASS_COS
-	else if (task_should_cos(p)) {
+	else if (cos_policy(p->policy)) {
+		/*
+		 * Here, when a thread set its sched_class to 
+		 * cos, we simply set the field sched_class
+		 * to cos_sched_class
+		 */
 		p->sched_class = &cos_sched_class;
-		// // 绑核
-		// preempt_disable();
-		// p->cos.cpu_id = smp_processor_id();
-		// sched_preempt_enable_no_resched();
 	}
 // #endif
 	else
@@ -8037,75 +8037,36 @@ do_sched_setscheduler(pid_t pid, int policy, struct sched_param __user *param)
 	printk("end %d\n", policy);
 	return retval;
 }
-// SCHED_CLASS_COS
-static int do_set_lord(int cpu_id) {
-	int retval = 0;
-	struct task_struct *p = current;
-	struct rq *rq;
-	// int cpu;
-	retval = cos_do_set_lord_cpu(cpu_id);
-	if (retval != 0) 
-		return retval;
-	// preempt_disable();
 
-	// // 获取当前运行cpu
-	// cpu = smp_processor_id();
-	// rq = cpu_rq(cpu);
-
-	// 获取当前线程
-	// rcu_read_lock();
-	// p = find_process_by_pid(0);
-	// if (likely(p)) {
-	// 	get_task_struct(p);
-	// } else {
-	// 	sched_preempt_enable_no_resched();
-	// 	rcu_read_unlock();
-	// 	return -ESRCH;
-	// }
-	// rcu_read_unlock();
-
-	// 设置调度类为cos
-	struct sched_param param = {
-		.sched_priority = 0,
-	};
-	// if (likely(p)) {
-	retval = sched_setscheduler(p, SCHED_COS, &param);
-		// put_task_struct(p);
-	// }
-	if (retval != 0) 
-		return retval;
-
-	// 设置lord为当前线程
-	rq = cpu_rq(cpu_id);
-	rq->cos.lord = p; // TODO：线程不安全, --------------------------解锁
-	rq->cos.lord_on_rq = 1;
-	set_lord_cpu(cpu_id);
-
-	// sched_preempt_enable_no_resched();
-	
-	// 设置成功，返回
-	return retval;
+//==================================SCHED_CLASS_COS=================================
+static int do_set_lord(int cpu_id) 
+{
+	return cos_do_set_lord(cpu_id);
 }
 
+/* for set_lord */
+int cos_set_cpus_allowed(struct task_struct *p, const struct cpumask *mask)
+{
+	struct affinity_context ac;
+	ac = (struct affinity_context) {
+		.new_mask  = mask,
+		.flags     = true,
+	};
+	return __set_cpus_allowed_ptr(p, &ac);
+}
 
 static int do_create_mq(void) 
 {
-	int retval = 0;
-	struct rq *rq;
-	int cpu;
-	preempt_disable();
-
-	// 获取当前运行cpu
-	cpu = smp_processor_id();
-	rq = cpu_rq(cpu);
-
-	int fd = cos_create_queue(&rq->cos);
-
-	sched_preempt_enable_no_resched();
-
-	return fd;
+	return cos_do_create_mq();
 }
 
+static int do_shoot_task(pid_t pid) 
+{
+	return cos_do_shoot_task(pid);
+}
+
+
+/* for shoot_task */
 void cos_agent_schedule(struct rq *rq)
 {
 	const int cpu = raw_smp_processor_id();
@@ -8125,46 +8086,7 @@ void cos_agent_schedule(struct rq *rq)
 	VM_BUG_ON(this_rq()->cpu != cpu);
 }
 
-
-static int do_shoot_task(pid_t pid) {
-	printk("shoot task start!\n");
-	int retval = 0;
-	struct task_struct *p;
-	struct rq *rq;
-	int cpu;
-	preempt_disable();
-
-	// 获取当前运行cpu
-	cpu = smp_processor_id();
-	rq = cpu_rq(cpu);
-
-	// 获取目标线程
-	rcu_read_lock();
-	p = find_process_by_pid(pid);
-	if (likely(p)) {
-		get_task_struct(p);
-	} else {
-		sched_preempt_enable_no_resched();
-		rcu_read_unlock();
-		return -ESRCH;
-	}
-	rcu_read_unlock();
-
-	retval = cos_shoot_task(p, rq);
-	sched_preempt_enable_no_resched();
-	return retval;
-}
-
-// SCHED_CLASS_COS
-int cos_set_cpus_allowed(struct task_struct *p, const struct cpumask *mask)
-{
-	struct affinity_context ac;
-	ac = (struct affinity_context){
-		.new_mask  = mask,
-		.flags     = true,
-	};
-	return __set_cpus_allowed_ptr(p, &ac);
-}
+//==================================SCHED_CLASS_COS=================================
 
 
 
@@ -8239,25 +8161,23 @@ SYSCALL_DEFINE3(sched_setscheduler, pid_t, pid, int, policy, struct sched_param 
 	return do_sched_setscheduler(pid, policy, param);
 }
 
+//===============================SCHED_CLASS_COS==============================
 /**
- * sys_set_lord - set current thread as the lord of cpu
- * @cpu: the cpu id in question.
+ * sys_set_lord - set current thread as the lord, running on the cpu_id
+ * @cpu_id: the cpu id in question.
  *
  * Return: 0 on success. An error code otherwise.
  */
-// SCHED_CLASS_COS
 SYSCALL_DEFINE1(set_lord, int, cpu_id)
 {
 	return do_set_lord(cpu_id);
 }
 
 /**
- * sys_create_mq
- * @cpu: the cpu id in question.
+ * sys_create_mq - create the message queue for cos
  *
  * Return: 0 on success. An error code otherwise.
  */
-// SCHED_CLASS_COS
 SYSCALL_DEFINE0(create_mq)
 {
 	return do_create_mq();
@@ -8269,11 +8189,11 @@ SYSCALL_DEFINE0(create_mq)
  *
  * Return: 0 on success. An error code otherwise.
  */
-// SCHED_CLASS_COS
 SYSCALL_DEFINE1(shoot_task, pid_t, pid)
 {
 	return do_shoot_task(pid);
 }
+//===============================SCHED_CLASS_COS==============================
 
 /**
  * sys_sched_setparam - set/change the RT priority of a thread
@@ -8338,7 +8258,7 @@ SYSCALL_DEFINE3(sched_setattr, pid_t, pid, struct sched_attr __user *, uattr,
  */
 SYSCALL_DEFINE1(sched_getscheduler, pid_t, pid)
 {
-	printk("sched_getscheduler start!\n");
+	printk("sched_getscheduler start! %d\n", pid);
 	struct task_struct *p;
 	int retval;
 
@@ -10134,16 +10054,12 @@ void __init sched_init(void)
 
 	/* Make sure the linker didn't screw up */
 	// SCHED_CLASS_COS
-	// BUG_ON(&idle_sched_class != &cos_sched_class + 1 ||
-	// 	   &cos_sched_class != &fair_sched_class + 1 ||
-	//        &fair_sched_class != &rt_sched_class + 1 ||
-	//        &rt_sched_class   != &dl_sched_class + 1);
 	BUG_ON(&idle_sched_class != &fair_sched_class + 1 ||
 		   &fair_sched_class != &cos_sched_class + 1 ||
 	       &cos_sched_class != &rt_sched_class + 1 ||
 	       &rt_sched_class   != &dl_sched_class + 1);
 #ifdef CONFIG_SMP
-// SCHED_CLASS_COS
+	// SCHED_CLASS_COS
 	BUG_ON(&dl_sched_class != &cos_lord_sched_class + 1 ||
 		   &cos_lord_sched_class != &stop_sched_class + 1);
 #endif
