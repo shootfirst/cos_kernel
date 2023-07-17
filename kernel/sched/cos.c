@@ -17,8 +17,10 @@
 #include "sched.h"
 
 // =======================================全局变量===========================================
-
+int cos_on = 0;
 int lord_cpu = 1;
+spinlock_t cos_global_lock;
+struct task_struct *lord = NULL;
 
 // =====================================全局变量结束=========================================
 
@@ -37,7 +39,7 @@ static struct task_struct *find_process_by_pid(pid_t pid)
 
 // =====================================系统调用函数=========================================
 //=====================================lord=======================================
-int cos_do_set_lord_cpu(int cpu_id) 
+int cos_move2target_rq(int cpu_id) 
 {
 	cpumask_var_t new_mask;
 	int ret;
@@ -56,10 +58,16 @@ int cos_do_set_lord_cpu(int cpu_id)
 	return ret;
 }
 
-void set_lord_cpu(int cpu) 
+/* must under cos_global_lock locked */
+void open_cos(struct rq *rq, struct task_struct *p, int cpu_id) 
 {
-	lord_cpu = cpu;
-	printk("lord_cpu %d\n", lord_cpu);
+	rq->cos.lord = p; 
+	rq->cos.lord_on_rq = 1;
+	lord_cpu = cpu_id;
+	BUG_ON(lord);
+	lord = p;
+	BUG_ON(cos_on == 1);
+	cos_on = 1;
 }
 
 int cos_do_set_lord(int cpu_id) 
@@ -67,30 +75,49 @@ int cos_do_set_lord(int cpu_id)
 	int retval = 0;
 	struct task_struct *p = current;
 	struct rq *rq;
-	// int cpu;
-	retval = cos_do_set_lord_cpu(cpu_id);
-	if (retval != 0) 
-		return retval;
+	ulong flags;
+
+	if (cos_on) 
+		return -EINVAL;
+
+	spin_lock_irqsave(&cos_global_lock, flags);
 	
+	/*
+	 * First move current task struct to target cpu rq.
+	 *
+	 * We do this in the kernel (compared to calling sched_setaffinity
+	 * from the agent) to step around any cpuset cgroup constraints. 
+	 * Because cos is not under the management of cgroup, we have the 
+	 * exclusive cgroup.
+	 */
+	retval = cos_move2target_rq(cpu_id);
+	if (retval != 0) 
+		goto out;
+	
+
+	/*
+	 * Then we set the sched class to cos using sched_setscheduler(same as 
+	 * sys_sched_setscheduler).
+	 */
 	struct sched_param param = {
 		.sched_priority = 0,
 	};
-	// if (likely(p)) {
 	retval = sched_setscheduler(p, SCHED_COS, &param);
-		// put_task_struct(p);
-	// }
 	if (retval != 0) 
-		return retval;
+		goto out;
 
+
+	/*
+	 * Now we open the cos scheduler, change cos_on to 1
+	 * to show that cos scheduler is under the control of lord.
+	 */
 	// 设置lord为当前线程
 	rq = cpu_rq(cpu_id);
-	rq->cos.lord = p; // TODO：线程不安全, --------------------------解锁
-	rq->cos.lord_on_rq = 1;
-	set_lord_cpu(cpu_id);
+	open_cos(rq, p, cpu_id);
 
-	// sched_preempt_enable_no_resched();
-	
-	// 设置成功，返回
+out:
+	spin_unlock_irqrestore(&cos_global_lock, flags);
+
 	return retval;
 }
 
@@ -264,6 +291,19 @@ int cos_do_shoot_task(pid_t pid)
 
 //====================================系统调用函数结束=======================================
 
+//==========================================cos辅助函数=========================================
+/* must under cos_global_lock locked */
+void close_cos(struct rq *rq) 
+{
+	rq->cos.lord = NULL; 
+	rq->cos.lord_on_rq = 0;
+	lord_cpu = 1;
+	lord = NULL;
+	BUG_ON(cos_on == 0);
+	cos_on = 0;
+}
+//==========================================cos辅助函数结束=========================================
+
 //==================================供core.c使用的函数=====================================
 
 void init_cos_rq(struct cos_rq *cos_rq) 
@@ -272,15 +312,13 @@ void init_cos_rq(struct cos_rq *cos_rq)
 	cos_rq->next_to_sched = NULL;
 	cos_rq->mq = NULL;
 	cos_rq->lord_on_rq = 0;
+
+	spin_lock_init(&cos_global_lock);
 }
 
-bool is_lord(struct rq *rq, struct task_struct *p)
+bool is_lord(struct task_struct *p)
 {
-	if (rq->cos.lord == p) {
-		return true;
-	}
-
-	return false;
+	return p != NULL && p == lord;
 }
 
 //==================================供core.c使用的函数=====================================
@@ -350,8 +388,10 @@ void task_dead_cos(struct task_struct *p) {
 	cpu = smp_processor_id();
 	rq = cpu_rq(cpu);
 	if (rq->cos.lord == p) {
-		rq->cos.lord = NULL;
-		rq->cos.lord_on_rq = 0;
+		ulong flags;
+		spin_lock_irqsave(&cos_global_lock, flags);
+		close_cos(rq);
+		spin_unlock_irqrestore(&cos_global_lock, flags);
 		if (rq->cos.mq) {
 			vfree(rq->cos.mq);
 			rq->cos.mq = NULL;
@@ -361,67 +401,85 @@ void task_dead_cos(struct task_struct *p) {
 	sched_preempt_enable_no_resched();
 }
 
-void yield_task_cos(struct rq *rq) {
+int select_task_rq_cos(struct task_struct *p, int task_cpu, int flags) 
+{
+	printk("select_task_rq_cos, lord_cpu %d\n", lord_cpu);
+	if (is_lord(p)) {
+		return lord_cpu;
+	}
+	return lord_cpu;
+}
+
+void yield_task_cos(struct rq *rq) 
+{
 	printk("yield_task_cos\n");
 }
 
-bool yield_to_task_cos(struct rq *rq, struct task_struct *p) {
+bool yield_to_task_cos(struct rq *rq, struct task_struct *p) 
+{
 	printk("yield_to_task_cos\n");
 	return false;
 }
 
-void check_preempt_curr_cos(struct rq *rq, struct task_struct *p, int flags) {
+void check_preempt_curr_cos(struct rq *rq, struct task_struct *p, int flags) 
+{
 	printk("check_preempt_curr_cos\n");
 }
 
-void put_prev_task_cos(struct rq *rq, struct task_struct *p) {
+void put_prev_task_cos(struct rq *rq, struct task_struct *p) 
+{
 	// printk("put_prev_task_cos\n");
 }
 
-void set_next_task_cos(struct rq *rq, struct task_struct *p, bool first) {
+void set_next_task_cos(struct rq *rq, struct task_struct *p, bool first) 
+{
 	// printk("set_next_task_cos\n");
 }
 
-int balance_cos(struct rq *rq, struct task_struct *prev, struct rq_flags *rf) {
+int balance_cos(struct rq *rq, struct task_struct *prev, struct rq_flags *rf) 
+{
 	// printk("balance_cos\n");
 	return 0;
 }
 
-int select_task_rq_cos(struct task_struct *p, int task_cpu, int flags) {
-	printk("select_task_rq_cos, lord_cpu %d\n", lord_cpu);
-	return lord_cpu;
-}
-
-void set_cpus_allowed_cos(struct task_struct *p, struct affinity_context *ctx) {
+void set_cpus_allowed_cos(struct task_struct *p, struct affinity_context *ctx) 
+{
 	printk("set_cpus_allowed_cos\n");
 }
 
-void rq_online_cos(struct rq *rq) {
+void rq_online_cos(struct rq *rq) 
+{
 	printk("rq_online_cos\n");
 }
 	
-void rq_offline_cos(struct rq *rq) {
+void rq_offline_cos(struct rq *rq) 
+{
 	printk("rq_offline_cos\n");
 }
 
-struct task_struct * pick_task_cos(struct rq *rq) {
+struct task_struct * pick_task_cos(struct rq *rq) 
+{
 	printk("pick_task_cos\n");
 	return NULL;
 }
 
-void task_tick_cos(struct rq *rq, struct task_struct *p, int queued) {
+void task_tick_cos(struct rq *rq, struct task_struct *p, int queued) 
+{
 	// printk("task_tick_cos\n");
 }
 
-void switched_to_cos(struct rq *this_rq, struct task_struct *task) {
+void switched_to_cos(struct rq *this_rq, struct task_struct *task) 
+{
 	printk("switched_to_cos\n");
 }
 
-void prio_changed_cos(struct rq *this_rq, struct task_struct *task, int oldprio) {
+void prio_changed_cos(struct rq *this_rq, struct task_struct *task, int oldprio) 
+{
 	printk("prio_changed_cos\n");
 }
 
-void update_curr_cos(struct rq *rq) {
+void update_curr_cos(struct rq *rq) 
+{
 	printk("update_curr_cos\n");
 }
 
