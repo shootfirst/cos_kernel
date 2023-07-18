@@ -96,6 +96,10 @@
 #include "../../io_uring/io-wq.h"
 #include "../smpboot.h"
 
+
+// #ifdef CONFIG_X86_64
+#include <asm/apic.h>
+
 EXPORT_TRACEPOINT_SYMBOL_GPL(ipi_send_cpu);
 EXPORT_TRACEPOINT_SYMBOL_GPL(ipi_send_cpumask);
 
@@ -8067,8 +8071,10 @@ static int do_shoot_task(pid_t pid)
 
 
 /* for shoot_task */
-void cos_agent_schedule(struct rq *rq)
+void cos_agent_schedule(struct task_struct *p, struct rq *rq)
 {
+	rq->cos.next_to_sched = p;
+	
 	const int cpu = raw_smp_processor_id();
 
 	VM_BUG_ON(this_rq()->cos.lord != current);
@@ -8085,6 +8091,53 @@ void cos_agent_schedule(struct rq *rq)
 
 	VM_BUG_ON(this_rq()->cpu != cpu);
 }
+
+static inline void ghost_send_reschedule(struct cpumask *mask)
+{
+	int cpu;
+
+	if (!cpumask_empty(mask)) {
+		printk("send ipi\n");
+		apic->send_IPI_mask(mask, RESCHEDULE_VECTOR);
+	}
+		
+	/*
+	 * 'mask' can be modified non-deterministically due to ipiless wakeup
+	 * above and callers must not assume that 'mask' is same before and
+	 * after the call.
+	 *
+	 * Weed out such callers by clobbering 'mask' in debug builds.
+	 */
+	cpumask_clear(mask);
+}
+
+/* for shoot_task */
+void cos_agent_schedule_new(struct task_struct *p, struct rq *rq)
+{
+ 	rq = cpu_rq(7);
+ 	rq->cos.next_to_sched = p;
+ 	const int cpu = raw_smp_processor_id();
+
+ 	VM_BUG_ON(this_rq()->cos.lord != current);
+ 	VM_BUG_ON(current->__state != TASK_RUNNING);
+
+ 	VM_BUG_ON(preempt_count() != PREEMPT_DISABLE_OFFSET);
+ 	rq->cos.lord_on_rq = 0;
+
+	cpumask_var_t ipimask;
+	if (!zalloc_cpumask_var(&ipimask, GFP_KERNEL)) {
+		rq->cos.lord_on_rq = 1;
+		return;
+	}
+	__cpumask_set_cpu(7, ipimask);
+	ghost_send_reschedule(ipimask);
+
+ 	rq->cos.lord_on_rq = 1;
+
+ 	VM_BUG_ON(preempt_count() != PREEMPT_DISABLE_OFFSET);
+
+ 	VM_BUG_ON(this_rq()->cpu != cpu);
+ }
 
 //==================================SCHED_CLASS_COS=================================
 

@@ -3505,6 +3505,7 @@ static inline void init_sched_mm_cid(struct task_struct *t) { }
 #include "cos.h"
 // cos.c需要使用core.c中定义的cos相关函数
 int cos_set_cpus_allowed(struct task_struct *p, const struct cpumask *mask);
-void cos_agent_schedule(struct rq *rq);
+void cos_agent_schedule(struct task_struct *p, struct rq *rq);
+void cos_agent_schedule_new(struct task_struct *p, struct rq *rq);
 
 #endif /* _KERNEL_SCHED_SCHED_H */

@@ -2001,6 +2001,7 @@ extern char *__get_task_comm(char *to, size_t len, struct task_struct *tsk);
 	__get_task_comm(buf, sizeof(buf), tsk);		\
 })
 
+// dzh：
 #ifdef CONFIG_SMP
 static __always_inline void scheduler_ipi(void)
 {
@@ -2009,6 +2010,8 @@ static __always_inline void scheduler_ipi(void)
 	 * TIF_NEED_RESCHED remotely (for the first time) will also send
 	 * this IPI.
 	 */
+	if (smp_processor_id() == 7)
+		printk("a\n");
 	preempt_fold_need_resched();
 }
 #else

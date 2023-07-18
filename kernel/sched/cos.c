@@ -221,10 +221,10 @@ int cos_do_create_mq(void)
 int cos_shoot_task(struct task_struct *p, struct rq *rq) 
 {
 	// 将p设为next_to_sched
-	rq->cos.next_to_sched = p;
+	// rq->cos.next_to_sched = p;
 
 	// 调用schedule()！！！
-	cos_agent_schedule(rq);
+	cos_agent_schedule_new(p, rq);
 
 	// 返回，宝贝！！！
 	return 0;
