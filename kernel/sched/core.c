@@ -6024,12 +6024,13 @@ static void put_prev_task_balance(struct rq *rq, struct task_struct *prev,
 /*
  * Pick up the highest-prio task:
  */
+// dzhdzh：
 static inline struct task_struct *
 __pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 {
 	const struct sched_class *class;
 	struct task_struct *p;
-	int impossilbe = 1;
+	int impossilbe = 0;
 	/*
 	 * Optimization: we know that if all tasks are in the fair class we can
 	 * call that function directly, but only if the @prev task wasn't of a
@@ -6054,7 +6055,9 @@ __pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 
 restart:
 	put_prev_task_balance(rq, prev, rf);
-
+	// if (cpu_of(rq) == 7) {
+	// 	printk("v\n");
+	// }
 	for_each_class(class) {
 		p = class->pick_next_task(rq);
 		if (p)
@@ -6101,6 +6104,7 @@ extern void task_vruntime_update(struct rq *rq, struct task_struct *p, bool in_f
 
 static void queue_core_balance(struct rq *rq);
 
+// dzhdzh：
 static struct task_struct *
 pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 {
@@ -6128,7 +6132,6 @@ pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 		rq->core_pick = NULL;
 		return __pick_next_task(rq, prev, rf);
 	}
-
 	/*
 	 * If there were no {en,de}queues since we picked (IOW, the task
 	 * pointers are all still valid), and we haven't scheduled the last
@@ -6700,7 +6703,6 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 		}
 		switch_count = &prev->nvcsw;
 	}
-
 	next = pick_next_task(rq, prev, &rf);
 	// ddd
 	// if (next->comm[0] == 'g' && next->comm[1] == 'o' && next->comm[2] == 'o' && next->comm[3] == 'd') {

@@ -333,6 +333,9 @@ void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 }
 
 struct task_struct *pick_next_task_cos(struct rq *rq) {
+	if (smp_processor_id() == 7) {
+		printk("c\n");
+	}
 	if (rq->cos.next_to_sched != NULL) {
 		return rq->cos.next_to_sched;
 	}
