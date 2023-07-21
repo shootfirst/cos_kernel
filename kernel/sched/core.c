@@ -2212,7 +2212,7 @@ void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags)
 
 // #ifdef CONFIG_SCHED_CLASS_COS
 	else if (sched_class_above(&cos_lord_sched_class, rq->curr->sched_class) &&
-		 is_lord(rq, p)) {
+		 is_lord(p)) {
 		/*
 		 * Normally, cos threads have the lowest
 		 * priority. The cos lord thread, however, is
