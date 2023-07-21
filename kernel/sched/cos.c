@@ -19,7 +19,7 @@
 // =======================================全局变量===========================================
 int cos_on = 0;
 int lord_cpu = 1;
-spinlock_t cos_global_lock;
+DEFINE_SPINLOCK(cos_global_lock);
 struct task_struct *lord = NULL;
 
 // =====================================全局变量结束=========================================
@@ -76,11 +76,6 @@ int cos_do_set_lord(int cpu_id)
 	struct task_struct *p = current;
 	struct rq *rq;
 	ulong flags;
-
-	if (cos_on) 
-		return -EINVAL;
-
-	spin_lock_irqsave(&cos_global_lock, flags);
 	
 	/*
 	 * First move current task struct to target cpu rq.
@@ -89,11 +84,25 @@ int cos_do_set_lord(int cpu_id)
 	 * from the agent) to step around any cpuset cgroup constraints. 
 	 * Because cos is not under the management of cgroup, we have the 
 	 * exclusive cgroup.
+	 * 
+	 * Warning! If the kernel already open the cos, and the lord cpu id 
+	 * is same as cpu_id, it will block here, because the lord is always
+	 * on the cpu.
 	 */
 	retval = cos_move2target_rq(cpu_id);
 	if (retval != 0) 
-		goto out;
+		goto move_fail;
 	
+
+	/*
+	 * Next we check if cos is on, if so we get to move_fail.
+	 * Why do not we lock before above move ？That is a good question.
+	 * Because we can not hold lock in move.
+	 */
+	if (cos_on) 
+		return -EINVAL;
+
+	spin_lock_irqsave(&cos_global_lock, flags);
 
 	/*
 	 * Then we set the sched class to cos using sched_setscheduler(same as 
@@ -118,6 +127,7 @@ int cos_do_set_lord(int cpu_id)
 out:
 	spin_unlock_irqrestore(&cos_global_lock, flags);
 
+move_fail:
 	return retval;
 }
 
@@ -313,7 +323,7 @@ void init_cos_rq(struct cos_rq *cos_rq)
 	cos_rq->mq = NULL;
 	cos_rq->lord_on_rq = 0;
 
-	spin_lock_init(&cos_global_lock);
+	// spin_lock_init(&cos_global_lock);
 }
 
 bool is_lord(struct task_struct *p)
