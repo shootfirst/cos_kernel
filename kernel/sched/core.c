@@ -8118,6 +8118,15 @@ void cos_agent_schedule_new(struct task_struct *p, struct rq *rq)
 {
  	rq = cpu_rq(7);
  	rq->cos.next_to_sched = p;
+	//-------------------------------------
+	struct rq_flags rf;
+	rq_lock_irqsave(rq, &rf);
+	// hwx: 设置NEED_RESCHED标志，发送ipi
+	// hwx: 不过这里我觉得还是加个判断条件好，if(current cpu != 7)则设置
+	!test_tsk_need_resched(rq->curr) &&
+			 set_nr_and_not_polling(rq->curr);
+	rq_unlock_irqrestore(rq, &rf);
+	//--------------------------------------------
  	const int cpu = raw_smp_processor_id();
 
  	VM_BUG_ON(this_rq()->cos.lord != current);
