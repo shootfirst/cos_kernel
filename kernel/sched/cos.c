@@ -22,7 +22,7 @@ int lord_cpu = 1;
 struct task_struct *lord = NULL;
 DEFINE_SPINLOCK(cos_global_lock);
 
-struct cos_message_queue *mq;
+struct cos_message_queue *global_mq;
 DEFINE_SPINLOCK(cos_mq_lock);
 
 struct cos_shoot_area *task_shoot_area; /* Only lord cpu will access it */
@@ -223,41 +223,32 @@ static const struct file_operations queue_fops = {
 //===================================共享内存相关=====================================
 
 //=====================================mq=========================================
-int cos_create_queue(struct cos_rq *cos_rq) 
+int cos_create_queue(void) 
 {
-	cos_rq->mq = vmalloc_user(sizeof(struct cos_message_queue));
+	global_mq = vmalloc_user(sizeof(struct cos_message_queue));
 
-	if (!cos_rq->mq) {
+	if (!global_mq) {
 		return -ESRCH;
 	}
 
-	int fd = anon_inode_getfd("[cos_queue]", &queue_fops, cos_rq->mq,
+	int fd = anon_inode_getfd("[cos_queue]", &queue_fops, global_mq,
 			      O_RDWR | O_CLOEXEC);
 
 	if (fd < 0) {
-		vfree(cos_rq->mq);
-		cos_rq->mq = NULL; //TODO
+		vfree(global_mq);
+		global_mq = NULL; //TODO
 	}
-	// cos_rq->mq->tail = 1;
-	// cos_rq->mq->data[0].pid = 666;
 
 	return fd;
 }
 
 int cos_do_create_mq(void) 
 {
-	int retval = 0;
-	struct rq *rq;
-	int cpu;
-	preempt_disable();
+	if (!is_lord(current)) {
+		return -EINVAL;
+	}
 
-	// 获取当前运行cpu
-	cpu = smp_processor_id();
-	rq = cpu_rq(cpu);
-
-	int fd = cos_create_queue(&rq->cos);
-
-	sched_preempt_enable_no_resched();
+	int fd = cos_create_queue();
 
 	return fd;
 }
@@ -409,9 +400,9 @@ void close_cos(struct rq *rq)
 		task_shoot_area = NULL; 
 	}
 	
-	if (rq->cos.mq) {
-		vfree(mq);
-		mq = NULL;
+	if (global_mq) {
+		vfree(global_mq);
+		global_mq = NULL;
 	}
 }
 //==========================================cos辅助函数结束=========================================
@@ -422,55 +413,31 @@ void init_cos_rq(struct cos_rq *cos_rq)
 {
 	cos_rq->lord = NULL;
 	cos_rq->next_to_sched = NULL;
-	cos_rq->mq = NULL;
-	// cos_rq->lord_on_rq = 0;
-
-	// spin_lock_init(&cos_global_lock);
 }
 
 bool is_lord(struct task_struct *p)
 {
-	return p != NULL && p == lord;
+	return p != NULL && lord != NULL && p == lord;
 }
 
 //==================================供core.c使用的函数=====================================
 
 //==================================消息队列函数=====================================
-
-void product_enqueue_msg(struct rq *rq, struct task_struct *p) {
-	if (p == rq->cos.lord || rq->cos.mq == NULL) {
-		return;
-	}
-	printk("sss\n");
-	rq->cos.mq->data[rq->cos.mq->tail].pid = p->pid;
-	rq->cos.mq->data[rq->cos.mq->tail].type = 1;
-	rq->cos.mq->tail++; // TODO
-}
-
-void product_dequeue_msg(struct rq *rq, struct task_struct *p) {
-	if (p == rq->cos.lord || rq->cos.mq == NULL) {
-		return;
-	}
-	rq->cos.mq->data[rq->cos.mq->tail].pid = p->pid;
-	rq->cos.mq->data[rq->cos.mq->tail].type = 2;
-	rq->cos.mq->tail++; // TODO
-}
-
 int _produce(struct cos_msg *msg) 
 {
 	ulong flags;
 	spin_lock_irqsave(&cos_mq_lock, flags);
 
-	if (mq->head - mq->tail >= _MQ_SIZE) { /* The queue is full */
+	if (global_mq->head - global_mq->tail >= _MQ_SIZE) { /* The queue is full */
 		WARN(1, "cos mq is full!\n");
 		spin_unlock_irqrestore(&cos_mq_lock, flags);
 		return -EINVAL;
 	}
 
-	mq->data[mq->head % _MQ_SIZE] = *msg;
+	global_mq->data[global_mq->head % _MQ_SIZE] = *msg;
 	smp_wmb(); /* msg update must before head update */
 
-	mq->head++;
+	global_mq->head++;
 	smp_wmb(); /* publish head update */
 
 	spin_unlock_irqrestore(&cos_mq_lock, flags);
@@ -480,7 +447,7 @@ int _produce(struct cos_msg *msg)
 
 int produce_task_message(u_int32_t msg_type, struct task_struct *p) 
 {
-	if (is_lord(p)) 
+	if (is_lord(p) || !global_mq) 
 		return 0;
 	
 	struct cos_msg msg;
@@ -553,8 +520,7 @@ void enqueue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 		// 666
 		// printk("shizheli! %d %d\n", rq->cos.lord_on_rq, p->__state);
 	}
-	product_enqueue_msg(rq, p);
-	// produce_task_runnable_msg(p);
+	produce_task_runnable_msg(p);
 }
 
 void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
@@ -566,8 +532,7 @@ void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 		// rq->cos.lord_on_rq = 0;
 		lord_on_rq = 0;
 	}
-	product_dequeue_msg(rq, p);
-	// produce_task_blocked_msg(p);
+	produce_task_blocked_msg(p);
 }
 
 struct task_struct *pick_next_task_cos(struct rq *rq) {
