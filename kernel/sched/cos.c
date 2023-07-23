@@ -22,6 +22,8 @@ int lord_cpu = 1;
 DEFINE_SPINLOCK(cos_global_lock);
 struct task_struct *lord = NULL;
 
+struct cos_shoot_area *task_shoot_area; /* Only lord cpu will access it */
+
 // =====================================全局变量结束=========================================
 
 // =====================================core.c=============================================
@@ -133,7 +135,7 @@ move_fail:
 
 //=====================================lord=======================================
 
-//=====================================mq=========================================
+//===================================共享内存相关=====================================
 static int _cos_mmap_common(struct vm_area_struct *vma, ulong mapsize)
 {
 	static const struct vm_operations_struct cos_vm_ops = {};
@@ -213,6 +215,9 @@ static const struct file_operations queue_fops = {
 	.mmap			= queue_mmap,
 };
 
+//===================================共享内存相关=====================================
+
+//=====================================mq=========================================
 int cos_create_queue(struct cos_rq *cos_rq) 
 {
 	cos_rq->mq = vmalloc_user(sizeof(struct cos_message_queue));
@@ -253,6 +258,42 @@ int cos_do_create_mq(void)
 }
 
 //=====================================mq=========================================
+
+//============================================init_shoot===================================================
+
+int cos_create_shoot_area(void) 
+{
+	task_shoot_area = vmalloc_user(sizeof(struct cos_shoot_area));
+
+	if (!task_shoot_area) {
+		return -ESRCH;
+	}
+
+	int fd = anon_inode_getfd("[shoot_area]", &queue_fops, task_shoot_area,
+			      O_RDWR | O_CLOEXEC);
+
+	if (fd < 0) {
+		vfree(task_shoot_area);
+		task_shoot_area = NULL; 
+	}
+	task_shoot_area->area[lord_cpu].pid = lord->pid; // for test TODO
+
+	return fd;
+}
+
+int cos_do_init_shoot(void) 
+{
+	/* Only lord can init shoot */
+	if (!is_lord(current)) {
+		return -EINVAL;
+	}
+	
+	int fd = cos_create_shoot_area();
+
+	return fd;
+}
+
+//============================================init_shoot===================================================
 
 //============================================shoot=======================================================
 int cos_shoot_task(struct task_struct *p, struct rq *rq) 
@@ -311,6 +352,9 @@ void close_cos(struct rq *rq)
 	lord = NULL;
 	BUG_ON(cos_on == 0);
 	cos_on = 0;
+
+	vfree(task_shoot_area);
+	task_shoot_area = NULL; 
 }
 //==========================================cos辅助函数结束=========================================
 

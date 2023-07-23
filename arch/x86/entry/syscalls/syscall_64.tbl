@@ -377,7 +377,8 @@
 # SCHED_CLASS_COS
 452 common  set_lord    sys_set_lord
 453 common  create_mq    sys_create_mq
-454 common  shoot_task    sys_shoot_task
+454 common  init_shoot    sys_init_shoot
+455 common  shoot_task    sys_shoot_task
 
 #
 # Due to a historical design error, certain syscalls are numbered differently

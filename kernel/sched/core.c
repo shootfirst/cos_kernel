@@ -8066,6 +8066,11 @@ static int do_create_mq(void)
 	return cos_do_create_mq();
 }
 
+static int do_init_shoot(void) 
+{
+	return cos_do_init_shoot();
+}
+
 static int do_shoot_task(pid_t pid) 
 {
 	return cos_do_shoot_task(pid);
@@ -8245,6 +8250,16 @@ SYSCALL_DEFINE1(set_lord, int, cpu_id)
 SYSCALL_DEFINE0(create_mq)
 {
 	return do_create_mq();
+}
+
+/**
+ * sys_init_shoot - create the message queue for cos
+ *
+ * Return: 0 on success. An error code otherwise.
+ */
+SYSCALL_DEFINE0(init_shoot)
+{
+	return do_init_shoot();
 }
 
 /**

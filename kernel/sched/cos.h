@@ -1,3 +1,4 @@
+//================================mq=====================================
 struct msg {
 	u_int32_t pid;
 	u_int32_t type;
@@ -8,6 +9,19 @@ struct cos_message_queue {
 	u_int32_t tail;
 	struct msg data[511];
 };
+//================================mq=====================================
+
+
+//================================init_shoot=====================================
+struct cos_shoot_arg {
+	u_int32_t pid;
+	u_int32_t info;
+};
+
+struct cos_shoot_area {
+	struct cos_shoot_arg area[512];
+};
+//================================init_shoot=====================================
 
 
 
@@ -20,6 +34,7 @@ bool is_lord(struct task_struct *p);
 // cos系统调用处理函数
 int cos_do_set_lord(int cpu_id);
 int cos_do_create_mq(void);
+int cos_do_init_shoot(void);
 int cos_do_shoot_task(pid_t pid);
 
 
