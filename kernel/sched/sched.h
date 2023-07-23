@@ -657,7 +657,7 @@ struct cfs_rq {
 // #ifdef CONFIG_SCHED_CLASS_COS
 struct cos_rq {
 	struct task_struct *lord;
-	unsigned int lord_on_rq;
+	// unsigned int lord_on_rq;
 	struct task_struct *next_to_sched; // return in pick_next_task
 	struct cos_message_queue *mq;
 };
@@ -3507,5 +3507,10 @@ static inline void init_sched_mm_cid(struct task_struct *t) { }
 int cos_set_cpus_allowed(struct task_struct *p, const struct cpumask *mask);
 void cos_agent_schedule(struct task_struct *p, struct rq *rq);
 void cos_agent_schedule_new(struct task_struct *p, struct rq *rq);
+
+void cos_remote_shoot(struct cpumask *ipi_mask);
+void cos_local_shoot(void);
+
+bool set_nr_and_not_polling(struct task_struct *p);
 
 #endif /* _KERNEL_SCHED_SCHED_H */

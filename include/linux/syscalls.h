@@ -717,7 +717,8 @@ asmlinkage long sys_sched_rr_get_interval_time32(pid_t pid,
 asmlinkage long sys_set_lord(int cpu_id);
 asmlinkage long sys_create_mq();
 asmlinkage long sys_init_shoot();
-asmlinkage long sys_shoot_task(pid_t pid);
+asmlinkage long sys_shoot_task(unsigned int len,
+					unsigned long __user *user_mask_ptr);
 
 /* kernel/signal.c */
 asmlinkage long sys_restart_syscall(void);

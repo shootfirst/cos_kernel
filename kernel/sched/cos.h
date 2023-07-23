@@ -35,7 +35,7 @@ bool is_lord(struct task_struct *p);
 int cos_do_set_lord(int cpu_id);
 int cos_do_create_mq(void);
 int cos_do_init_shoot(void);
-int cos_do_shoot_task(pid_t pid);
+int cos_do_shoot_task(cpumask_var_t shoot_mask);
 
 
 

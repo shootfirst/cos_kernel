@@ -23,6 +23,7 @@ DEFINE_SPINLOCK(cos_global_lock);
 struct task_struct *lord = NULL;
 
 struct cos_shoot_area *task_shoot_area; /* Only lord cpu will access it */
+int lord_on_rq = 0;
 
 // =====================================全局变量结束=========================================
 
@@ -64,7 +65,8 @@ int cos_move2target_rq(int cpu_id)
 void open_cos(struct rq *rq, struct task_struct *p, int cpu_id) 
 {
 	rq->cos.lord = p; 
-	rq->cos.lord_on_rq = 1;
+	// rq->cos.lord_on_rq = 1;
+	lord_on_rq = 1;
 	lord_cpu = cpu_id;
 	BUG_ON(lord);
 	lord = p;
@@ -276,7 +278,7 @@ int cos_create_shoot_area(void)
 		vfree(task_shoot_area);
 		task_shoot_area = NULL; 
 	}
-	task_shoot_area->area[lord_cpu].pid = lord->pid; // for test TODO
+	// task_shoot_area->area[lord_cpu].pid = lord->pid; // for test TODO
 
 	return fd;
 }
@@ -296,47 +298,136 @@ int cos_do_init_shoot(void)
 //============================================init_shoot===================================================
 
 //============================================shoot=======================================================
-int cos_shoot_task(struct task_struct *p, struct rq *rq) 
+// int cos_shoot_task(struct task_struct *p, struct rq *rq) 
+// {
+// 	// 将p设为next_to_sched
+// 	// rq->cos.next_to_sched = p;
+
+// 	// 调用schedule()！！！
+// 	cos_agent_schedule_new(p, rq);
+
+// 	// 返回，宝贝！！！
+// 	return 0;
+// }
+
+// int cos_do_shoot_task(pid_t pid) 
+// {
+	// printk("shoot task start! %d\n", pid);
+	// int retval = 0;
+	// struct task_struct *p;
+	// struct rq *rq;
+	// int cpu;
+	// preempt_disable();
+
+	// // 获取当前运行cpu
+	// cpu = smp_processor_id();
+	// rq = cpu_rq(cpu);
+
+	// // 获取目标线程
+	// rcu_read_lock();
+	// p = find_process_by_pid(pid);
+	// if (likely(p)) {
+	// 	get_task_struct(p);
+	// } else {
+	// 	sched_preempt_enable_no_resched();
+	// 	rcu_read_unlock();
+	// 	return -ESRCH;
+	// }
+	// rcu_read_unlock();
+
+	// retval = cos_shoot_task(p, rq);
+	// sched_preempt_enable_no_resched();
+	// return retval;
+// }
+
+
+
+int cos_do_shoot_task(cpumask_var_t shoot_mask) 
 {
-	// 将p设为next_to_sched
-	// rq->cos.next_to_sched = p;
-
-	// 调用schedule()！！！
-	cos_agent_schedule_new(p, rq);
-
-	// 返回，宝贝！！！
-	return 0;
-}
-
-
-int cos_do_shoot_task(pid_t pid) 
-{
-	printk("shoot task start! %d\n", pid);
-	int retval = 0;
+	int need_local_shoot;
 	struct task_struct *p;
+	pid_t pid;
 	struct rq *rq;
-	int cpu;
+
+	cpumask_var_t ipimask; /* for sent ipi */
+	if (!alloc_cpumask_var(&ipimask, GFP_KERNEL))
+		return -ENOMEM;
+
+	int cpu_id;
+
+	/*
+	 * Here we set each cpu id setting by userspace
+	 * , check and set the ipimask and next_to_sched.
+	 */
 	preempt_disable();
+	for_each_cpu(cpu_id, shoot_mask) {
 
-	// 获取当前运行cpu
-	cpu = smp_processor_id();
-	rq = cpu_rq(cpu);
+		/* 
+		 * First we use shared memory shoot_area to get 
+		 * the pid and task struct.
+		 */
+		pid = task_shoot_area->area[cpu_id].pid;
 
-	// 获取目标线程
-	rcu_read_lock();
-	p = find_process_by_pid(pid);
-	if (likely(p)) {
+		rcu_read_lock();
+		p = find_process_by_pid(pid);
+
+		if (unlikely(!p)) {
+			/* 
+			 * We continue when the pid getting from user
+			 * is not valid. TODO：是否需要通知用户态
+		 	 */
+			rcu_read_unlock();
+			printk("shoot pid %d is not exist\n", pid);
+			continue;
+		}
+		
 		get_task_struct(p);
-	} else {
-		sched_preempt_enable_no_resched();
 		rcu_read_unlock();
-		return -ESRCH;
-	}
-	rcu_read_unlock();
+		
 
-	retval = cos_shoot_task(p, rq);
-	sched_preempt_enable_no_resched();
-	return retval;
+		/* Then we get the target cpu rq and set next_to_sched*/
+		rq = cpu_rq(cpu_id);
+		if (unlikely(!rq)) {
+			/* 
+			 * We continue when the cpu id setting from user
+			 * is not valid.TODO：是否需要通知用户态
+		 	 */
+			printk("shoot cpu %d is not exist\n", cpu_id);
+			continue;
+		}
+
+ 		rq->cos.next_to_sched = p; // TODO 线程安全  抢占逻辑
+
+
+		/* Finally we set the ipimask or local shoot is needed */
+		if (cpu_id == lord_cpu) {
+			need_local_shoot = true;
+		} else {
+			__cpumask_set_cpu(cpu_id, ipimask);
+
+			// TODO：can we move it to ipi handler ？
+			struct rq_flags rf;
+			rq_lock_irqsave(rq, &rf);
+			!test_tsk_need_resched(rq->curr) &&
+					 set_nr_and_not_polling(rq->curr);
+			rq_unlock_irqrestore(rq, &rf);
+		}
+	}
+
+	/* do shoot work */
+	cos_remote_shoot(ipimask);
+
+	if (need_local_shoot) {
+		lord_on_rq = 0;
+		cos_local_shoot();
+		lord_on_rq = 1;
+	}
+
+	preempt_enable_no_resched();
+
+	free_cpumask_var(ipimask);
+
+	return 0;
 }
 //============================================shoot=======================================================
 
@@ -347,7 +438,8 @@ int cos_do_shoot_task(pid_t pid)
 void close_cos(struct rq *rq) 
 {
 	rq->cos.lord = NULL; 
-	rq->cos.lord_on_rq = 0;
+	// rq->cos.lord_on_rq = 0;
+	lord_on_rq = 0;
 	lord_cpu = 1;
 	lord = NULL;
 	BUG_ON(cos_on == 0);
@@ -365,7 +457,7 @@ void init_cos_rq(struct cos_rq *cos_rq)
 	cos_rq->lord = NULL;
 	cos_rq->next_to_sched = NULL;
 	cos_rq->mq = NULL;
-	cos_rq->lord_on_rq = 0;
+	// cos_rq->lord_on_rq = 0;
 
 	// spin_lock_init(&cos_global_lock);
 }
@@ -406,7 +498,8 @@ void enqueue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 	// rq->cos.lord = p;
 	printk("enqueue_task_cos  %d  cpu %d\n", p->pid, task_cpu(p));
 	if (p == rq->cos.lord) {
-		rq->cos.lord_on_rq = 1;
+		// rq->cos.lord_on_rq = 1;
+		lord_on_rq = 1;
 		// 666
 		// printk("shizheli! %d %d\n", rq->cos.lord_on_rq, p->__state);
 	}
@@ -419,7 +512,8 @@ void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 	if (rq->cos.next_to_sched == p) 
 		rq->cos.next_to_sched = NULL;
 	if (p == rq->cos.lord) {
-		rq->cos.lord_on_rq = 0;
+		// rq->cos.lord_on_rq = 0;
+		lord_on_rq = 0;
 	}
 	product_dequeue_msg(rq, p);
 }
@@ -602,7 +696,7 @@ struct task_struct *pick_next_task_cos_lord(struct rq *rq) {
 		// 666
 		// printk("aaaaaaaaaa\n");
 	}
-	if (rq->cos.lord != NULL && (task_is_running(rq->cos.lord) || rq->cos.lord->__state, TASK_WAKING) && rq->cos.lord_on_rq != 0) {
+	if (rq->cos.lord != NULL && (task_is_running(rq->cos.lord) || rq->cos.lord->__state, TASK_WAKING) && lord_on_rq != 0) {
 		// 666
 		// printk("dzhdzhdzh\n");
 		return rq->cos.lord;

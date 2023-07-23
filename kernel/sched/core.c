@@ -906,7 +906,7 @@ static inline void hrtick_rq_init(struct rq *rq)
  * this avoids any races wrt polling state changes and thereby avoids
  * spurious IPIs.
  */
-static inline bool set_nr_and_not_polling(struct task_struct *p)
+bool set_nr_and_not_polling(struct task_struct *p)
 {
 	struct thread_info *ti = task_thread_info(p);
 	return !(fetch_or(&ti->flags, _TIF_NEED_RESCHED) & _TIF_POLLING_NRFLAG);
@@ -935,7 +935,7 @@ static bool set_nr_if_polling(struct task_struct *p)
 }
 
 #else
-static inline bool set_nr_and_not_polling(struct task_struct *p)
+bool set_nr_and_not_polling(struct task_struct *p)
 {
 	set_tsk_need_resched(p);
 	return true;
@@ -8071,90 +8071,114 @@ static int do_init_shoot(void)
 	return cos_do_init_shoot();
 }
 
-static int do_shoot_task(pid_t pid) 
+static int do_shoot_task(cpumask_var_t shoot_mask) 
 {
-	return cos_do_shoot_task(pid);
+	return cos_do_shoot_task(shoot_mask);
 }
 
 
 /* for shoot_task */
-void cos_agent_schedule(struct task_struct *p, struct rq *rq)
-{
-	rq->cos.next_to_sched = p;
+// void cos_agent_schedule(struct task_struct *p, struct rq *rq)
+// {
+// 	rq->cos.next_to_sched = p;
 	
+// 	const int cpu = raw_smp_processor_id();
+
+// 	VM_BUG_ON(this_rq()->cos.lord != current);
+// 	VM_BUG_ON(current->__state != TASK_RUNNING);
+
+// 	VM_BUG_ON(preempt_count() != PREEMPT_DISABLE_OFFSET);
+// 	rq->cos.lord_on_rq = 0;
+
+// 	__schedule(false);
+
+// 	rq->cos.lord_on_rq = 1;
+
+// 	VM_BUG_ON(preempt_count() != PREEMPT_DISABLE_OFFSET);
+
+// 	VM_BUG_ON(this_rq()->cpu != cpu);
+// }
+
+// static inline void ghost_send_reschedule(struct cpumask *mask)
+// {
+// 	int cpu;
+
+// 	if (!cpumask_empty(mask)) {
+// 		printk("send ipi\n");
+// 		apic->send_IPI_mask(mask, RESCHEDULE_VECTOR);
+// 	}
+		
+// 	/*
+// 	 * 'mask' can be modified non-deterministically due to ipiless wakeup
+// 	 * above and callers must not assume that 'mask' is same before and
+// 	 * after the call.
+// 	 *
+// 	 * Weed out such callers by clobbering 'mask' in debug builds.
+// 	 */
+// 	cpumask_clear(mask);
+// }
+
+/* for shoot_task */
+// void cos_agent_schedule_new(struct task_struct *p, struct rq *rq)
+// {
+//  	rq = cpu_rq(7);
+//  	rq->cos.next_to_sched = p;
+// 	//-------------------------------------
+// 	struct rq_flags rf;
+// 	rq_lock_irqsave(rq, &rf);
+// 	!test_tsk_need_resched(rq->curr) &&
+// 			 set_nr_and_not_polling(rq->curr);
+// 	rq_unlock_irqrestore(rq, &rf);
+// 	//--------------------------------------------
+//  	const int cpu = raw_smp_processor_id();
+
+//  	VM_BUG_ON(this_rq()->cos.lord != current);
+//  	VM_BUG_ON(current->__state != TASK_RUNNING);
+
+//  	VM_BUG_ON(preempt_count() != PREEMPT_DISABLE_OFFSET);
+//  	rq->cos.lord_on_rq = 0;
+
+// 	cpumask_var_t ipimask;
+// 	if (!zalloc_cpumask_var(&ipimask, GFP_KERNEL)) {
+// 		rq->cos.lord_on_rq = 1;
+// 		return;
+// 	}
+// 	__cpumask_set_cpu(7, ipimask);
+// 	ghost_send_reschedule(ipimask);
+
+//  	rq->cos.lord_on_rq = 1;
+
+//  	VM_BUG_ON(preempt_count() != PREEMPT_DISABLE_OFFSET);
+
+//  	VM_BUG_ON(this_rq()->cpu != cpu);
+// }
+
+void cos_remote_shoot(struct cpumask *ipi_mask) {
+	int cpu;
+
+	VM_BUG_ON(this_rq()->cos.lord != current);
+	if (!cpumask_empty(ipi_mask)) {
+		printk("send ipi\n");
+		apic->send_IPI_mask(ipi_mask, RESCHEDULE_VECTOR);
+	}
+}
+
+/* must called with lord_on_rq = 0 and preempt disabled */
+void cos_local_shoot(void)
+{
 	const int cpu = raw_smp_processor_id();
 
 	VM_BUG_ON(this_rq()->cos.lord != current);
 	VM_BUG_ON(current->__state != TASK_RUNNING);
 
 	VM_BUG_ON(preempt_count() != PREEMPT_DISABLE_OFFSET);
-	rq->cos.lord_on_rq = 0;
 
 	__schedule(false);
-
-	rq->cos.lord_on_rq = 1;
 
 	VM_BUG_ON(preempt_count() != PREEMPT_DISABLE_OFFSET);
 
 	VM_BUG_ON(this_rq()->cpu != cpu);
 }
-
-static inline void ghost_send_reschedule(struct cpumask *mask)
-{
-	int cpu;
-
-	if (!cpumask_empty(mask)) {
-		printk("send ipi\n");
-		apic->send_IPI_mask(mask, RESCHEDULE_VECTOR);
-	}
-		
-	/*
-	 * 'mask' can be modified non-deterministically due to ipiless wakeup
-	 * above and callers must not assume that 'mask' is same before and
-	 * after the call.
-	 *
-	 * Weed out such callers by clobbering 'mask' in debug builds.
-	 */
-	cpumask_clear(mask);
-}
-
-/* for shoot_task */
-void cos_agent_schedule_new(struct task_struct *p, struct rq *rq)
-{
- 	rq = cpu_rq(7);
- 	rq->cos.next_to_sched = p;
-	//-------------------------------------
-	struct rq_flags rf;
-	rq_lock_irqsave(rq, &rf);
-	// hwx: 设置NEED_RESCHED标志，发送ipi
-	// hwx: 不过这里我觉得还是加个判断条件好，if(current cpu != 7)则设置
-	!test_tsk_need_resched(rq->curr) &&
-			 set_nr_and_not_polling(rq->curr);
-	rq_unlock_irqrestore(rq, &rf);
-	//--------------------------------------------
- 	const int cpu = raw_smp_processor_id();
-
- 	VM_BUG_ON(this_rq()->cos.lord != current);
- 	VM_BUG_ON(current->__state != TASK_RUNNING);
-
- 	VM_BUG_ON(preempt_count() != PREEMPT_DISABLE_OFFSET);
- 	rq->cos.lord_on_rq = 0;
-
-	cpumask_var_t ipimask;
-	if (!zalloc_cpumask_var(&ipimask, GFP_KERNEL)) {
-		rq->cos.lord_on_rq = 1;
-		return;
-	}
-	__cpumask_set_cpu(7, ipimask);
-	ghost_send_reschedule(ipimask);
-
- 	rq->cos.lord_on_rq = 1;
-
- 	VM_BUG_ON(preempt_count() != PREEMPT_DISABLE_OFFSET);
-
- 	VM_BUG_ON(this_rq()->cpu != cpu);
- }
-
 //==================================SCHED_CLASS_COS=================================
 
 
@@ -8260,17 +8284,6 @@ SYSCALL_DEFINE0(create_mq)
 SYSCALL_DEFINE0(init_shoot)
 {
 	return do_init_shoot();
-}
-
-/**
- * sys_shoot_task
- * @cpu: the cpu id in question.
- *
- * Return: 0 on success. An error code otherwise.
- */
-SYSCALL_DEFINE1(shoot_task, pid_t, pid)
-{
-	return do_shoot_task(pid);
 }
 //===============================SCHED_CLASS_COS==============================
 
@@ -8678,6 +8691,32 @@ SYSCALL_DEFINE3(sched_setaffinity, pid_t, pid, unsigned int, len,
 	free_cpumask_var(new_mask);
 	return retval;
 }
+
+// ==========================================SCHED_CLASS_COS============================================
+/**
+ * sys_shoot_task
+ * @cpu: the cpu id in question.
+ *
+ * Return: 0 on success. An error code otherwise.
+ */
+SYSCALL_DEFINE2(shoot_task, unsigned int, len,
+		unsigned long __user *, user_mask_ptr)
+{
+	cpumask_var_t shoot_mask;
+	int retval;
+
+	if (!alloc_cpumask_var(&shoot_mask, GFP_KERNEL))
+		return -ENOMEM;
+
+	retval = get_user_cpu_mask(user_mask_ptr, len, shoot_mask);
+
+	if (retval == 0)
+		retval = do_shoot_task(shoot_mask);
+
+	free_cpumask_var(shoot_mask);
+	return retval;
+}
+// ==========================================SCHED_CLASS_COS============================================
 
 long sched_getaffinity(pid_t pid, struct cpumask *mask)
 {
