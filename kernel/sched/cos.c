@@ -19,8 +19,11 @@
 // =======================================全局变量===========================================
 int cos_on = 0;
 int lord_cpu = 1;
-DEFINE_SPINLOCK(cos_global_lock);
 struct task_struct *lord = NULL;
+DEFINE_SPINLOCK(cos_global_lock);
+
+struct cos_message_queue *mq;
+DEFINE_SPINLOCK(cos_mq_lock);
 
 struct cos_shoot_area *task_shoot_area; /* Only lord cpu will access it */
 int lord_on_rq = 0;
@@ -298,50 +301,6 @@ int cos_do_init_shoot(void)
 //============================================init_shoot===================================================
 
 //============================================shoot=======================================================
-// int cos_shoot_task(struct task_struct *p, struct rq *rq) 
-// {
-// 	// 将p设为next_to_sched
-// 	// rq->cos.next_to_sched = p;
-
-// 	// 调用schedule()！！！
-// 	cos_agent_schedule_new(p, rq);
-
-// 	// 返回，宝贝！！！
-// 	return 0;
-// }
-
-// int cos_do_shoot_task(pid_t pid) 
-// {
-	// printk("shoot task start! %d\n", pid);
-	// int retval = 0;
-	// struct task_struct *p;
-	// struct rq *rq;
-	// int cpu;
-	// preempt_disable();
-
-	// // 获取当前运行cpu
-	// cpu = smp_processor_id();
-	// rq = cpu_rq(cpu);
-
-	// // 获取目标线程
-	// rcu_read_lock();
-	// p = find_process_by_pid(pid);
-	// if (likely(p)) {
-	// 	get_task_struct(p);
-	// } else {
-	// 	sched_preempt_enable_no_resched();
-	// 	rcu_read_unlock();
-	// 	return -ESRCH;
-	// }
-	// rcu_read_unlock();
-
-	// retval = cos_shoot_task(p, rq);
-	// sched_preempt_enable_no_resched();
-	// return retval;
-// }
-
-
-
 int cos_do_shoot_task(cpumask_var_t shoot_mask) 
 {
 	int need_local_shoot;
@@ -445,8 +404,15 @@ void close_cos(struct rq *rq)
 	BUG_ON(cos_on == 0);
 	cos_on = 0;
 
-	vfree(task_shoot_area);
-	task_shoot_area = NULL; 
+	if (task_shoot_area) {
+		vfree(task_shoot_area);
+		task_shoot_area = NULL; 
+	}
+	
+	if (rq->cos.mq) {
+		vfree(mq);
+		mq = NULL;
+	}
 }
 //==========================================cos辅助函数结束=========================================
 
@@ -490,6 +456,90 @@ void product_dequeue_msg(struct rq *rq, struct task_struct *p) {
 	rq->cos.mq->tail++; // TODO
 }
 
+int _produce(struct cos_msg *msg) 
+{
+	ulong flags;
+	spin_lock_irqsave(&cos_mq_lock, flags);
+
+	if (mq->head - mq->tail >= _MQ_SIZE) { /* The queue is full */
+		WARN(1, "cos mq is full!\n");
+		spin_unlock_irqrestore(&cos_mq_lock, flags);
+		return -EINVAL;
+	}
+
+	mq->data[mq->head % _MQ_SIZE] = *msg;
+	smp_wmb(); /* msg update must before head update */
+
+	mq->head++;
+	smp_wmb(); /* publish head update */
+
+	spin_unlock_irqrestore(&cos_mq_lock, flags);
+
+	return 0;
+}
+
+int produce_task_message(u_int32_t msg_type, struct task_struct *p) 
+{
+	if (is_lord(p)) 
+		return 0;
+	
+	struct cos_msg msg;
+
+	switch (msg_type) {
+	case MSG_TASK_RUNNABLE: 
+		msg.type = MSG_TASK_RUNNABLE;
+		break;
+	case MSG_TASK_BLOCKED:
+		msg.type = MSG_TASK_BLOCKED;
+		break;
+	case MSG_TASK_NEW:
+		msg.type = MSG_TASK_NEW;
+		printk("do not support cos msg %d\n", MSG_TASK_NEW);
+		break;
+	case MSG_TASK_DEAD:
+		msg.type = MSG_TASK_DEAD;
+		printk("do not support cos msg %d\n", MSG_TASK_DEAD);
+		break;
+	case MSG_TASK_PREEMPT:
+		msg.type = MSG_TASK_PREEMPT;
+		printk("do not support cos msg %d\n", MSG_TASK_PREEMPT);
+		break;
+	default:
+		WARN(1, "unknown cos_msg type %d!\n", msg_type);
+		return -EINVAL;
+	}
+
+	msg.pid = p->pid;
+
+	return _produce(&msg);
+
+}
+
+int produce_task_runnable_msg(struct task_struct *p) 
+{
+	return produce_task_message(MSG_TASK_RUNNABLE, p);
+}
+
+int produce_task_blocked_msg(struct task_struct *p) 
+{
+	return produce_task_message(MSG_TASK_BLOCKED, p);
+}
+
+int produce_task_new_msg(struct task_struct *p) 
+{
+	return produce_task_message(MSG_TASK_NEW, p);
+}
+
+int produce_task_dead_msg(struct task_struct *p) 
+{
+	return produce_task_message(MSG_TASK_DEAD, p);
+}
+
+int produce_task_peempt_msg(struct task_struct *p) 
+{
+	return produce_task_message(MSG_TASK_PREEMPT, p);
+}
+
 //==================================消息队列函数结束=====================================
 
 //==================================cos调度类钩子函数=====================================
@@ -504,6 +554,7 @@ void enqueue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 		// printk("shizheli! %d %d\n", rq->cos.lord_on_rq, p->__state);
 	}
 	product_enqueue_msg(rq, p);
+	// produce_task_runnable_msg(p);
 }
 
 void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
@@ -516,6 +567,7 @@ void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 		lord_on_rq = 0;
 	}
 	product_dequeue_msg(rq, p);
+	// produce_task_blocked_msg(p);
 }
 
 struct task_struct *pick_next_task_cos(struct rq *rq) {
@@ -540,10 +592,10 @@ void task_dead_cos(struct task_struct *p) {
 		spin_lock_irqsave(&cos_global_lock, flags);
 		close_cos(rq);
 		spin_unlock_irqrestore(&cos_global_lock, flags);
-		if (rq->cos.mq) {
-			vfree(rq->cos.mq);
-			rq->cos.mq = NULL;
-		}
+		// if (rq->cos.mq) {
+		// 	vfree(rq->cos.mq);
+		// 	rq->cos.mq = NULL;
+		// }
 	}
 
 	sched_preempt_enable_no_resched();
