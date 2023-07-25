@@ -104,6 +104,7 @@ struct task_struct init_task
 // #ifdef CONFIG_SCHED_CLASS_COS
 	.cos		= {
 		.is_new    = 0,
+		.is_blocked    = 0,
 	},
 // #endif
 #endif

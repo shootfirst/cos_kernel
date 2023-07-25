@@ -529,6 +529,7 @@ void enqueue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 		// 666
 		// printk("shizheli! %d %d\n", rq->cos.lord_on_rq, p->__state);
 	}
+	p->cos.is_blocked = 0;
 	produce_task_runnable_msg(p);
 }
 
@@ -539,6 +540,7 @@ void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 		// rq->cos.lord_on_rq = 0;
 		lord_on_rq = 0;
 	}
+	p->cos.is_blocked = 1;
 	produce_task_blocked_msg(p);
 }
 

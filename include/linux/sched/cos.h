@@ -7,6 +7,7 @@
  */
 struct sched_cos_entity {
 	uint is_new;
+	uint is_blocked;
 };
 
 #endif	/* _LINUX_SCHED_COS_H */
