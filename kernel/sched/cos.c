@@ -463,19 +463,15 @@ int produce_task_message(u_int32_t msg_type, struct task_struct *p)
 		break;
 	case MSG_TASK_NEW:
 		msg.type = MSG_TASK_NEW;
-		printk("do not support cos msg %d\n", MSG_TASK_NEW);
 		break;
 	case MSG_TASK_DEAD:
 		msg.type = MSG_TASK_DEAD;
-		printk("do not support cos msg %d\n", MSG_TASK_DEAD);
 		break;
 	case MSG_TASK_PREEMPT:
 		msg.type = MSG_TASK_PREEMPT;
-		printk("do not support cos msg %d\n", MSG_TASK_PREEMPT);
 		break;
 	case MSG_TASK_NEW_BLOCKED:
 		msg.type = MSG_TASK_NEW_BLOCKED;
-		printk("do not support cos msg %d\n", MSG_TASK_NEW_BLOCKED);
 		break;
 	default:
 		WARN(1, "unknown cos_msg type %d!\n", msg_type);
@@ -483,7 +479,7 @@ int produce_task_message(u_int32_t msg_type, struct task_struct *p)
 	}
 
 	msg.pid = p->pid;
-
+	printk("kernel produce msg: type: %d, pid %d\n", msg_type, p->pid);
 	return _produce(&msg);
 
 }
@@ -610,9 +606,11 @@ void task_dead_cos(struct task_struct *p) {
 		spin_unlock_irqrestore(&cos_global_lock, flags);
 	}
 
-	if (rq->cos.next_to_sched == p) {
+	if (rq->cos.next_to_sched == p) 
 		rq->cos.next_to_sched = NULL;
-	}
+
+	if (p->__state == TASK_DEAD) 
+		produce_task_dead_msg(p);
 
 	sched_preempt_enable_no_resched();
 }
