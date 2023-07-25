@@ -45,6 +45,7 @@ extern const struct sched_class cos_lord_sched_class;
 // 外部使用
 bool is_lord(struct task_struct *p);
 void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct task_struct *next);
+int produce_task_dead_msg(struct task_struct *p);
 
 // cos系统调用处理函数
 int cos_do_set_lord(int cpu_id);

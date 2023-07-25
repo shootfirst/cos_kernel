@@ -74,6 +74,9 @@
 #include <asm/unistd.h>
 #include <asm/mmu_context.h>
 
+// SCHED_CLASS_COS
+#include "sched/cos.h"
+
 /*
  * The default value should be high enough to not crash a system that randomly
  * crashes its kernel from time to time, but low enough to at least not permit
@@ -810,8 +813,11 @@ static void synchronize_group_exit(struct task_struct *tsk, long code)
 void __noreturn do_exit(long code)
 {
 	struct task_struct *tsk = current;
-	if (tsk->policy == 8)
+	// SCHED_CLASS_COS
+	if (tsk->policy == SCHED_COS) {
 		printk("exit start %d\n", tsk->pid);
+		produce_task_dead_msg(tsk);
+	}
 	int group_dead;
 
 	WARN_ON(irqs_disabled());
