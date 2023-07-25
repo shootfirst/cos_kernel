@@ -535,8 +535,6 @@ void enqueue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 	// rq->cos.lord = NULL;
 	printk("dequeue_task_cos  %d  cpu %d\n", p->pid, task_cpu(p));
-	if (rq->cos.next_to_sched == p) 
-		rq->cos.next_to_sched = NULL;
 	if (p == rq->cos.lord) {
 		// rq->cos.lord_on_rq = 0;
 		lord_on_rq = 0;
@@ -545,7 +543,7 @@ void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 }
 
 struct task_struct *pick_next_task_cos(struct rq *rq) {
-	if (rq->cos.next_to_sched != NULL) {
+	if (rq->cos.next_to_sched != NULL && task_is_running(rq->cos.next_to_sched)) {
 		return rq->cos.next_to_sched;
 	}
 	if (rq->cos.lord != NULL && task_is_running(rq->cos.lord)) {
@@ -566,10 +564,10 @@ void task_dead_cos(struct task_struct *p) {
 		spin_lock_irqsave(&cos_global_lock, flags);
 		close_cos(rq);
 		spin_unlock_irqrestore(&cos_global_lock, flags);
-		// if (rq->cos.mq) {
-		// 	vfree(rq->cos.mq);
-		// 	rq->cos.mq = NULL;
-		// }
+	}
+
+	if (rq->cos.next_to_sched == p) {
+		rq->cos.next_to_sched = NULL;
 	}
 
 	sched_preempt_enable_no_resched();
