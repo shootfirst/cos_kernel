@@ -347,6 +347,7 @@ int cos_do_shoot_task(cpumask_var_t shoot_mask)
 		}
 
  		rq->cos.next_to_sched = p; // TODO 线程安全  抢占逻辑
+		rq->cos.is_shoot_first = 1;
 
 
 		/* Finally we set the ipimask or local shoot is needed */
@@ -413,6 +414,7 @@ void init_cos_rq(struct cos_rq *cos_rq)
 {
 	cos_rq->lord = NULL;
 	cos_rq->next_to_sched = NULL;
+	cos_rq->is_shoot_first = 0;
 }
 
 bool is_lord(struct task_struct *p)
@@ -745,14 +747,14 @@ DEFINE_SCHED_CLASS(cos) = {
 //==================================cos lord调度类钩子函数=====================================
 
 struct task_struct *pick_next_task_cos_lord(struct rq *rq) {
-	// lord不为空 lord可以运行 lord此时没有处于shoot负载的状态
-	if (smp_processor_id() == lord_cpu) {
-		// 666
-		// printk("aaaaaaaaaa\n");
+	if (rq->cos.next_to_sched != NULL && task_is_running(rq->cos.next_to_sched) && rq->cos.is_shoot_first) {
+		// 动态优先级提升！！！！！！！！！
+		rq->cos.is_shoot_first = 0;
+		return rq->cos.next_to_sched;
 	}
-	if (rq->cos.lord != NULL && (task_is_running(rq->cos.lord) || rq->cos.lord->__state, TASK_WAKING) && lord_on_rq != 0) {
-		// 666
-		// printk("dzhdzhdzh\n");
+
+	// lord不为空 lord可以运行 lord此时没有处于shoot负载的状态
+	if (rq->cos.lord != NULL && task_is_running(rq->cos.lord) && lord_on_rq) {
 		return rq->cos.lord;
 	}
 	return NULL;

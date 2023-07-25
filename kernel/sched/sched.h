@@ -658,6 +658,7 @@ struct cfs_rq {
 struct cos_rq {
 	struct task_struct *lord;
 	struct task_struct *next_to_sched; // return in pick_next_task
+	int is_shoot_first;
 };
 
 static inline int rt_bandwidth_enabled(void)
