@@ -676,7 +676,14 @@ void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct tas
 		}
 		
 		prev->cos.is_new = 0;
+		return;
 	}
+
+	if (prev->cos.is_blocked) {
+		return;
+	}
+
+	produce_task_peempt_msg(prev);
 }
 
 /*
