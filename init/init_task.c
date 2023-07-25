@@ -103,7 +103,7 @@ struct task_struct init_task
 	.sched_task_group = &root_task_group,
 // #ifdef CONFIG_SCHED_CLASS_COS
 	.cos		= {
-		.cpu_id     = 1,
+		.is_new    = 0,
 	},
 // #endif
 #endif

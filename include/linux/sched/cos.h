@@ -6,7 +6,7 @@
  * for a task to be scheduled by COS.
  */
 struct sched_cos_entity {
-	u64         cpu_id;  // 做好初始化
+	uint is_new;
 };
 
 #endif	/* _LINUX_SCHED_COS_H */

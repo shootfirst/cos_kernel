@@ -5213,6 +5213,8 @@ prepare_task_switch(struct rq *rq, struct task_struct *prev,
 	rseq_preempt(prev);
 	fire_sched_out_preempt_notifiers(prev, next);
 	kmap_local_sched_out();
+	// SCHED_CLASS_COS
+	cos_prepare_task_switch(rq, prev, next);
 	prepare_task(next);
 	prepare_arch_switch(next);
 }
@@ -7088,6 +7090,7 @@ static void __setscheduler_prio(struct task_struct *p, int prio)
 		 * to cos_sched_class
 		 */
 		p->sched_class = &cos_sched_class;
+		p->cos.is_new = 1;
 	}
 // #endif
 	else

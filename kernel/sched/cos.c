@@ -471,6 +471,10 @@ int produce_task_message(u_int32_t msg_type, struct task_struct *p)
 		msg.type = MSG_TASK_PREEMPT;
 		printk("do not support cos msg %d\n", MSG_TASK_PREEMPT);
 		break;
+	case MSG_TASK_NEW_BLOCKED:
+		msg.type = MSG_TASK_NEW_BLOCKED;
+		printk("do not support cos msg %d\n", MSG_TASK_NEW_BLOCKED);
+		break;
 	default:
 		WARN(1, "unknown cos_msg type %d!\n", msg_type);
 		return -EINVAL;
@@ -505,6 +509,11 @@ int produce_task_dead_msg(struct task_struct *p)
 int produce_task_peempt_msg(struct task_struct *p) 
 {
 	return produce_task_message(MSG_TASK_PREEMPT, p);
+}
+
+int produce_task_new_blocked_msg(struct task_struct *p) 
+{
+	return produce_task_message(MSG_TASK_NEW_BLOCKED, p);
 }
 
 //==================================消息队列函数结束=====================================
@@ -648,6 +657,27 @@ void update_curr_cos(struct rq *rq)
 	printk("update_curr_cos\n");
 }
 
+void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct task_struct *next) 
+{
+	
+	if (!cos_policy(prev->policy)) {
+		return;
+	}
+
+	if (is_lord(prev)) {
+		return;
+	}
+
+	if (prev->cos.is_new) {
+		if (task_on_rq_queued(prev)) {
+			produce_task_new_msg(prev);
+		} else {
+			produce_task_new_blocked_msg(prev);
+		}
+		
+		prev->cos.is_new = 0;
+	}
+}
 
 /*
  * Omitted operations:

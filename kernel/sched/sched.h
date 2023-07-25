@@ -657,9 +657,7 @@ struct cfs_rq {
 // #ifdef CONFIG_SCHED_CLASS_COS
 struct cos_rq {
 	struct task_struct *lord;
-	// unsigned int lord_on_rq;
 	struct task_struct *next_to_sched; // return in pick_next_task
-	// struct cos_message_queue *mq;
 };
 
 static inline int rt_bandwidth_enabled(void)
