@@ -508,7 +508,7 @@ int produce_task_dead_msg(struct task_struct *p)
 	return produce_task_message(MSG_TASK_DEAD, p);
 }
 
-int produce_task_peempt_msg(struct task_struct *p) 
+int produce_task_preempt_msg(struct task_struct *p) 
 {
 	return produce_task_message(MSG_TASK_PREEMPT, p);
 }
@@ -516,6 +516,43 @@ int produce_task_peempt_msg(struct task_struct *p)
 int produce_task_new_blocked_msg(struct task_struct *p) 
 {
 	return produce_task_message(MSG_TASK_NEW_BLOCKED, p);
+}
+
+void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct task_struct *next) 
+{
+	
+	if (!cos_policy(prev->policy)) {
+		return;
+	}
+
+	if (is_lord(prev)) {
+		return;
+	}
+
+	if (prev->cos.is_new) {
+		if (task_on_rq_queued(prev)) {
+			produce_task_new_msg(prev);
+		} else {
+			produce_task_new_blocked_msg(prev);
+		}
+		
+		prev->cos.is_new = 0;
+		return;
+	}
+
+	if (prev->cos.is_blocked) {
+		return;
+	}
+
+	if (unlikely(prev == next)) {
+		return;
+	}
+
+	if (prev == rq->cos.next_to_sched)
+		rq->cos.next_to_sched = NULL;
+	printk("preempt by %d sched_class %d\n", next->pid, next->policy);
+
+	produce_task_preempt_msg(prev);
 }
 
 //==================================消息队列函数结束=====================================
@@ -541,6 +578,9 @@ void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 	if (p == rq->cos.lord) {
 		// rq->cos.lord_on_rq = 0;
 		lord_on_rq = 0;
+	}
+	if (p == rq->cos.next_to_sched) {
+		rq->cos.next_to_sched = NULL;
 	}
 	p->cos.is_blocked = 1;
 	produce_task_blocked_msg(p);
@@ -657,39 +697,6 @@ void prio_changed_cos(struct rq *this_rq, struct task_struct *task, int oldprio)
 void update_curr_cos(struct rq *rq) 
 {
 	printk("update_curr_cos\n");
-}
-
-void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct task_struct *next) 
-{
-	
-	if (!cos_policy(prev->policy)) {
-		return;
-	}
-
-	if (is_lord(prev)) {
-		return;
-	}
-
-	if (prev->cos.is_new) {
-		if (task_on_rq_queued(prev)) {
-			produce_task_new_msg(prev);
-		} else {
-			produce_task_new_blocked_msg(prev);
-		}
-		
-		prev->cos.is_new = 0;
-		return;
-	}
-
-	if (prev->cos.is_blocked) {
-		return;
-	}
-
-	if (unlikely(prev == next)) {
-		return;
-	}
-
-	produce_task_peempt_msg(prev);
 }
 
 /*
