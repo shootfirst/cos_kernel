@@ -223,6 +223,104 @@ static const struct file_operations queue_fops = {
 //===================================共享内存相关=====================================
 
 //=====================================mq=========================================
+int _produce(struct cos_msg *msg) 
+{
+	ulong flags;
+	spin_lock_irqsave(&cos_mq_lock, flags);
+
+	if (global_mq->head - global_mq->tail >= _MQ_SIZE) { /* The queue is full */
+		WARN(1, "cos mq is full!\n");
+		spin_unlock_irqrestore(&cos_mq_lock, flags);
+		return -EINVAL;
+	}
+
+	global_mq->data[global_mq->head % _MQ_SIZE] = *msg;
+	smp_wmb(); /* msg update must before head update */
+
+	global_mq->head++;
+	smp_wmb(); /* publish head update */
+
+	spin_unlock_irqrestore(&cos_mq_lock, flags);
+
+	return 0;
+}
+
+int produce_task_message(u_int32_t msg_type, struct task_struct *p) 
+{
+	if (is_lord(p) || !global_mq) 
+		return 0;
+	
+	struct cos_msg msg;
+
+	switch (msg_type) {
+	case MSG_TASK_RUNNABLE: 
+		msg.type = MSG_TASK_RUNNABLE;
+		break;
+	case MSG_TASK_BLOCKED:
+		msg.type = MSG_TASK_BLOCKED;
+		break;
+	case MSG_TASK_NEW:
+		msg.type = MSG_TASK_NEW;
+		break;
+	case MSG_TASK_DEAD:
+		msg.type = MSG_TASK_DEAD;
+		break;
+	case MSG_TASK_PREEMPT:
+		msg.type = MSG_TASK_PREEMPT;
+		break;
+	case MSG_TASK_NEW_BLOCKED:
+		msg.type = MSG_TASK_NEW_BLOCKED;
+		break;
+	case MSG_TASK_COS_PREEMPT:
+		msg.type = MSG_TASK_COS_PREEMPT;
+		break;
+	default:
+		WARN(1, "unknown cos_msg type %d!\n", msg_type);
+		return -EINVAL;
+	}
+
+	msg.pid = p->pid;
+	printk("kernel produce msg: type: %d, pid %d\n", msg_type, p->pid);
+	return _produce(&msg);
+
+}
+
+int produce_task_runnable_msg(struct task_struct *p) 
+{
+	return produce_task_message(MSG_TASK_RUNNABLE, p);
+}
+
+int produce_task_blocked_msg(struct task_struct *p) 
+{
+	return produce_task_message(MSG_TASK_BLOCKED, p);
+}
+
+int produce_task_new_msg(struct task_struct *p) 
+{
+	return produce_task_message(MSG_TASK_NEW, p);
+}
+
+int produce_task_dead_msg(struct task_struct *p) 
+{
+	return produce_task_message(MSG_TASK_DEAD, p);
+}
+
+int produce_task_preempt_msg(struct task_struct *p) 
+{
+	return produce_task_message(MSG_TASK_PREEMPT, p);
+}
+
+int produce_task_new_blocked_msg(struct task_struct *p) 
+{
+	return produce_task_message(MSG_TASK_NEW_BLOCKED, p);
+}
+
+int produce_task_cos_preempt_msg(struct task_struct *p) 
+{
+	return produce_task_message(MSG_TASK_COS_PREEMPT, p);
+}
+
+
 int cos_create_queue(void) 
 {
 	global_mq = vmalloc_user(sizeof(struct cos_message_queue));
@@ -346,8 +444,12 @@ int cos_do_shoot_task(cpumask_var_t shoot_mask)
 			continue;
 		}
 
+		if (rq->cos.next_to_sched && rq->cos.next_to_sched != p) 
+			produce_task_cos_preempt_msg(rq->cos.next_to_sched);
  		rq->cos.next_to_sched = p; // TODO 线程安全  抢占逻辑
 		rq->cos.is_shoot_first = 1;
+		
+		printk("shoot thread %d to cpu %d\n", p->pid, cpu_id);
 
 
 		/* Finally we set the ipimask or local shoot is needed */
@@ -422,106 +524,6 @@ bool is_lord(struct task_struct *p)
 	return p != NULL && lord != NULL && p == lord;
 }
 
-//==================================供core.c使用的函数=====================================
-
-//==================================消息队列函数=====================================
-int _produce(struct cos_msg *msg) 
-{
-	ulong flags;
-	spin_lock_irqsave(&cos_mq_lock, flags);
-
-	if (global_mq->head - global_mq->tail >= _MQ_SIZE) { /* The queue is full */
-		WARN(1, "cos mq is full!\n");
-		spin_unlock_irqrestore(&cos_mq_lock, flags);
-		return -EINVAL;
-	}
-
-	global_mq->data[global_mq->head % _MQ_SIZE] = *msg;
-	smp_wmb(); /* msg update must before head update */
-
-	global_mq->head++;
-	smp_wmb(); /* publish head update */
-
-	spin_unlock_irqrestore(&cos_mq_lock, flags);
-
-	return 0;
-}
-
-int produce_task_message(u_int32_t msg_type, struct task_struct *p) 
-{
-	if (is_lord(p) || !global_mq) 
-		return 0;
-	
-	struct cos_msg msg;
-
-	switch (msg_type) {
-	case MSG_TASK_RUNNABLE: 
-		msg.type = MSG_TASK_RUNNABLE;
-		break;
-	case MSG_TASK_BLOCKED:
-		msg.type = MSG_TASK_BLOCKED;
-		break;
-	case MSG_TASK_NEW:
-		msg.type = MSG_TASK_NEW;
-		break;
-	case MSG_TASK_DEAD:
-		msg.type = MSG_TASK_DEAD;
-		break;
-	case MSG_TASK_PREEMPT:
-		msg.type = MSG_TASK_PREEMPT;
-		break;
-	case MSG_TASK_NEW_BLOCKED:
-		msg.type = MSG_TASK_NEW_BLOCKED;
-		break;
-	case MSG_TASK_COS_PREEMPT:
-		msg.type = MSG_TASK_COS_PREEMPT;
-		break;
-	default:
-		WARN(1, "unknown cos_msg type %d!\n", msg_type);
-		return -EINVAL;
-	}
-
-	msg.pid = p->pid;
-	printk("kernel produce msg: type: %d, pid %d\n", msg_type, p->pid);
-	return _produce(&msg);
-
-}
-
-int produce_task_runnable_msg(struct task_struct *p) 
-{
-	return produce_task_message(MSG_TASK_RUNNABLE, p);
-}
-
-int produce_task_blocked_msg(struct task_struct *p) 
-{
-	return produce_task_message(MSG_TASK_BLOCKED, p);
-}
-
-int produce_task_new_msg(struct task_struct *p) 
-{
-	return produce_task_message(MSG_TASK_NEW, p);
-}
-
-int produce_task_dead_msg(struct task_struct *p) 
-{
-	return produce_task_message(MSG_TASK_DEAD, p);
-}
-
-int produce_task_preempt_msg(struct task_struct *p) 
-{
-	return produce_task_message(MSG_TASK_PREEMPT, p);
-}
-
-int produce_task_new_blocked_msg(struct task_struct *p) 
-{
-	return produce_task_message(MSG_TASK_NEW_BLOCKED, p);
-}
-
-int produce_task_cos_preempt_msg(struct task_struct *p) 
-{
-	return produce_task_message(MSG_TASK_COS_PREEMPT, p);
-}
-
 void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct task_struct *next) 
 {
 	
@@ -556,22 +558,20 @@ void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct tas
 		rq->cos.next_to_sched = NULL;
 	printk("preempt by %d sched_class %d\n", next->pid, next->policy);
 
-	if (cos_policy(next->policy)) {
-		produce_task_cos_preempt_msg(prev);
-	} else {
+	if (!cos_policy(next->policy)) {
 		produce_task_preempt_msg(prev);
-	}	
+	}
 
 	
 }
 
-//==================================消息队列函数结束=====================================
+//==================================供core.c使用的函数=====================================
 
 //==================================cos调度类钩子函数=====================================
 
 void enqueue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 	// rq->cos.lord = p;
-	printk("enqueue_task_cos  %d  cpu %d\n", p->pid, task_cpu(p));
+	// printk("enqueue_task_cos  %d  cpu %d\n", p->pid, task_cpu(p));
 	if (p == rq->cos.lord) {
 		// rq->cos.lord_on_rq = 1;
 		lord_on_rq = 1;
@@ -584,7 +584,7 @@ void enqueue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 
 void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 	// rq->cos.lord = NULL;
-	printk("dequeue_task_cos  %d  cpu %d\n", p->pid, task_cpu(p));
+	// printk("dequeue_task_cos  %d  cpu %d\n", p->pid, task_cpu(p));
 	if (p == rq->cos.lord) {
 		// rq->cos.lord_on_rq = 0;
 		lord_on_rq = 0;
