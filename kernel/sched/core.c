@@ -8084,7 +8084,6 @@ void cos_remote_shoot(struct cpumask *ipi_mask) {
 
 	VM_BUG_ON(this_rq()->cos.lord != current);
 	if (!cpumask_empty(ipi_mask)) {
-		printk("send ipi\n");
 		apic->send_IPI_mask(ipi_mask, RESCHEDULE_VECTOR);
 	}
 }

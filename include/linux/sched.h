@@ -2010,9 +2010,9 @@ static __always_inline void scheduler_ipi(void)
 	 * TIF_NEED_RESCHED remotely (for the first time) will also send
 	 * this IPI.
 	 */
-	if (smp_processor_id() == 7) {
-		printk("a: %d\n", tif_need_resched());
-	}
+	// if (smp_processor_id() == 7) {
+	// 	printk("a: %d\n", tif_need_resched());
+	// }
 	preempt_fold_need_resched();
 }
 #else
