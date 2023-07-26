@@ -473,6 +473,9 @@ int produce_task_message(u_int32_t msg_type, struct task_struct *p)
 	case MSG_TASK_NEW_BLOCKED:
 		msg.type = MSG_TASK_NEW_BLOCKED;
 		break;
+	case MSG_TASK_COS_PREEMPT:
+		msg.type = MSG_TASK_COS_PREEMPT;
+		break;
 	default:
 		WARN(1, "unknown cos_msg type %d!\n", msg_type);
 		return -EINVAL;
@@ -514,6 +517,11 @@ int produce_task_new_blocked_msg(struct task_struct *p)
 	return produce_task_message(MSG_TASK_NEW_BLOCKED, p);
 }
 
+int produce_task_cos_preempt_msg(struct task_struct *p) 
+{
+	return produce_task_message(MSG_TASK_COS_PREEMPT, p);
+}
+
 void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct task_struct *next) 
 {
 	
@@ -548,7 +556,13 @@ void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct tas
 		rq->cos.next_to_sched = NULL;
 	printk("preempt by %d sched_class %d\n", next->pid, next->policy);
 
-	produce_task_preempt_msg(prev);
+	if (cos_policy(next->policy)) {
+		produce_task_cos_preempt_msg(prev);
+	} else {
+		produce_task_preempt_msg(prev);
+	}	
+
+	
 }
 
 //==================================消息队列函数结束=====================================
