@@ -1,4 +1,6 @@
 //================================mq=====================================
+#define _MAX_SEQ_NUM ((1 << 16) - 1)
+
 /* cos message type */
 #define _MSG_TASK_FIRST	1
 enum {
@@ -15,7 +17,8 @@ enum {
 
 struct cos_msg {
 	u_int32_t pid;
-	u_int32_t type;
+	u_int16_t type;
+	u_int16_t seq;
 };
 
 struct cos_message_queue {
@@ -27,13 +30,16 @@ struct cos_message_queue {
 
 
 //================================init_shoot=====================================
-#define _SHOOT_AREA_SIZE 512
+#define _SHOOT_AREA_SIZE 511
+#define _SA_RIGHT 0
+#define _SA_ERROR 1
 struct cos_shoot_arg {
 	u_int32_t pid;
 	u_int32_t info;
 };
 
 struct cos_shoot_area {
+	u_int64_t seq;
 	struct cos_shoot_arg area[_SHOOT_AREA_SIZE];
 };
 //================================init_shoot=====================================

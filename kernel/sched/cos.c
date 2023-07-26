@@ -23,6 +23,7 @@ struct task_struct *lord = NULL;
 DEFINE_SPINLOCK(cos_global_lock);
 
 struct cos_message_queue *global_mq;
+u_int16_t global_seq = 0;
 DEFINE_SPINLOCK(cos_mq_lock);
 
 struct cos_shoot_area *task_shoot_area; /* Only lord cpu will access it */
@@ -233,6 +234,15 @@ int _produce(struct cos_msg *msg)
 		spin_unlock_irqrestore(&cos_mq_lock, flags);
 		return -EINVAL;
 	}
+	
+	msg->seq = global_seq;
+	global_seq++;
+	smp_mb();
+	if (global_seq >= _MAX_SEQ_NUM) {
+		WARN(1, "mq seq is full!\n");
+		spin_unlock_irqrestore(&cos_mq_lock, flags);
+		return -EINVAL;
+	}
 
 	global_mq->data[global_mq->head % _MQ_SIZE] = *msg;
 	smp_wmb(); /* msg update must before head update */
@@ -240,6 +250,7 @@ int _produce(struct cos_msg *msg)
 	global_mq->head++;
 	smp_wmb(); /* publish head update */
 
+	printk("kernel produce msg: type: %d, pid %d\n", msg->type, msg->pid);
 	spin_unlock_irqrestore(&cos_mq_lock, flags);
 
 	return 0;
@@ -280,7 +291,7 @@ int produce_task_message(u_int32_t msg_type, struct task_struct *p)
 	}
 
 	msg.pid = p->pid;
-	printk("kernel produce msg: type: %d, pid %d\n", msg_type, p->pid);
+	// printk("kernel produce msg: type: %d, pid %d\n", msg_type, p->pid);
 	return _produce(&msg);
 
 }
@@ -392,6 +403,14 @@ int cos_do_init_shoot(void)
 //============================================shoot=======================================================
 int cos_do_shoot_task(cpumask_var_t shoot_mask) 
 {
+	ulong flags;
+	spin_lock_irqsave(&cos_mq_lock, flags);
+	if (global_seq - 1 != task_shoot_area->seq)  {
+		spin_unlock_irqrestore(&cos_mq_lock, flags);
+		return -EINVAL;
+	}
+	spin_unlock_irqrestore(&cos_mq_lock, flags);
+
 	int need_local_shoot;
 	struct task_struct *p;
 	pid_t pid;
@@ -432,6 +451,11 @@ int cos_do_shoot_task(cpumask_var_t shoot_mask)
 		get_task_struct(p);
 		rcu_read_unlock();
 		
+		if (unlikely(!task_is_running(p))) {
+			task_shoot_area->area[cpu_id].info = _SA_ERROR;
+			printk("no sync in the shoot loop! %d to cpu %d\n", p->pid, cpu_id);
+			continue;
+		}
 
 		/* Then we get the target cpu rq and set next_to_sched*/
 		rq = cpu_rq(cpu_id);
