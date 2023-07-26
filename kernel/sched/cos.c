@@ -468,11 +468,13 @@ int cos_do_shoot_task(cpumask_var_t shoot_mask)
 			continue;
 		}
 
+		spin_lock_irqsave(&rq->cos.lock, flags);
 		if (rq->cos.next_to_sched && rq->cos.next_to_sched != p) 
 			produce_task_cos_preempt_msg(rq->cos.next_to_sched);
  		rq->cos.next_to_sched = p; // TODO 线程安全  抢占逻辑
 		rq->cos.is_shoot_first = 1;
-		
+		spin_unlock_irqrestore(&rq->cos.lock, flags);
+
 		printk("shoot thread %d to cpu %d\n", p->pid, cpu_id);
 
 
@@ -539,6 +541,7 @@ void close_cos(struct rq *rq)
 void init_cos_rq(struct cos_rq *cos_rq) 
 {
 	cos_rq->lord = NULL;
+	spin_lock_init(&cos_rq->lock);
 	cos_rq->next_to_sched = NULL;
 	cos_rq->is_shoot_first = 0;
 }
@@ -578,8 +581,12 @@ void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct tas
 		return;
 	}
 
+	ulong flags;
+	spin_lock_irqsave(&rq->cos.lock, flags);
 	if (prev == rq->cos.next_to_sched)
 		rq->cos.next_to_sched = NULL;
+	spin_unlock_irqrestore(&rq->cos.lock, flags);
+
 	printk("preempt by %d sched_class %d\n", next->pid, next->policy);
 
 	if (!cos_policy(next->policy)) {
@@ -613,17 +620,28 @@ void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 		// rq->cos.lord_on_rq = 0;
 		lord_on_rq = 0;
 	}
+
+	ulong lock_flags;
+	spin_lock_irqsave(&rq->cos.lock, lock_flags);
 	if (p == rq->cos.next_to_sched) {
 		rq->cos.next_to_sched = NULL;
 	}
+	spin_unlock_irqrestore(&rq->cos.lock, lock_flags);
+
 	p->cos.is_blocked = 1;
 	produce_task_blocked_msg(p);
 }
 
 struct task_struct *pick_next_task_cos(struct rq *rq) {
+
+	ulong flags;
+	spin_lock_irqsave(&rq->cos.lock, flags);
 	if (rq->cos.next_to_sched != NULL && task_is_running(rq->cos.next_to_sched)) {
+		spin_unlock_irqrestore(&rq->cos.lock, flags);
 		return rq->cos.next_to_sched;
 	}
+	spin_unlock_irqrestore(&rq->cos.lock, flags);
+
 	if (rq->cos.lord != NULL && task_is_running(rq->cos.lord)) {
 		return rq->cos.lord;
 	}
@@ -644,8 +662,11 @@ void task_dead_cos(struct task_struct *p) {
 		spin_unlock_irqrestore(&cos_global_lock, flags);
 	}
 
+	ulong flags;
+	spin_lock_irqsave(&rq->cos.lock, flags);
 	if (rq->cos.next_to_sched == p) 
 		rq->cos.next_to_sched = NULL;
+	spin_unlock_irqrestore(&rq->cos.lock, flags);
 
 	if (p->__state == TASK_DEAD) 
 		produce_task_dead_msg(p);
@@ -794,11 +815,15 @@ DEFINE_SCHED_CLASS(cos) = {
 //==================================cos lord调度类钩子函数=====================================
 
 struct task_struct *pick_next_task_cos_lord(struct rq *rq) {
+	ulong flags;
+	spin_lock_irqsave(&rq->cos.lock, flags);
 	if (rq->cos.next_to_sched != NULL && task_is_running(rq->cos.next_to_sched) && rq->cos.is_shoot_first) {
 		// 动态优先级提升！！！！！！！！！
 		rq->cos.is_shoot_first = 0;
+		spin_unlock_irqrestore(&rq->cos.lock, flags);
 		return rq->cos.next_to_sched;
 	}
+	spin_unlock_irqrestore(&rq->cos.lock, flags);
 
 	// lord不为空 lord可以运行 lord此时没有处于shoot负载的状态
 	if (rq->cos.lord != NULL && task_is_running(rq->cos.lord) && lord_on_rq) {
