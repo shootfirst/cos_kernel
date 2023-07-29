@@ -51,6 +51,7 @@ extern const struct sched_class cos_lord_sched_class;
 
 // 外部使用
 bool is_lord(struct task_struct *p);
+bool is_dying(struct task_struct *p);
 void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct task_struct *next);
 int produce_task_dead_msg(struct task_struct *p);
 

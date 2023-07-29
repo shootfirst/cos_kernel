@@ -450,6 +450,12 @@ int cos_do_shoot_task(cpumask_var_t shoot_mask)
 		
 		get_task_struct(p);
 		rcu_read_unlock();
+
+		if (unlikely(p->cos.is_dying)) {
+			task_shoot_area->area[cpu_id].info = _SA_ERROR;
+			// printk("task %d is dying, can not be shot!\n", p->pid, cpu_id);
+			continue;
+		}
 		
 		if (unlikely(!task_is_running(p))) {
 			task_shoot_area->area[cpu_id].info = _SA_ERROR;
@@ -460,18 +466,22 @@ int cos_do_shoot_task(cpumask_var_t shoot_mask)
 		/* Then we get the target cpu rq and set next_to_sched*/
 		rq = cpu_rq(cpu_id);
 		if (unlikely(!rq)) {
-			/* 
-			 * We continue when the cpu id setting from user
-			 * is not valid.TODO：是否需要通知用户态
-		 	 */
+			task_shoot_area->area[cpu_id].info = _SA_ERROR;
 			printk("shoot cpu %d is not exist\n", cpu_id);
 			continue;
 		}
 
 		spin_lock_irqsave(&rq->cos.lock, flags);
-		if (rq->cos.next_to_sched && rq->cos.next_to_sched != p) 
-			produce_task_cos_preempt_msg(rq->cos.next_to_sched);
- 		rq->cos.next_to_sched = p; // TODO 线程安全  抢占逻辑
+		if (rq->cos.next_to_sched && rq->cos.next_to_sched != p) {
+			if (unlikely(rq->cos.next_to_sched->cos.is_dying)) {
+				task_shoot_area->area[cpu_id].info = _SA_ERROR;
+				spin_unlock_irqrestore(&rq->cos.lock, flags);
+				printk("task %d is dying, can not be shot!\n", p->pid, cpu_id);
+				continue;
+			} else 
+				produce_task_cos_preempt_msg(rq->cos.next_to_sched);
+		}
+ 		rq->cos.next_to_sched = p; 
 		rq->cos.is_shoot_first = 1;
 		spin_unlock_irqrestore(&rq->cos.lock, flags);
 
@@ -551,6 +561,11 @@ bool is_lord(struct task_struct *p)
 	return p != NULL && lord != NULL && p == lord;
 }
 
+bool is_dying(struct task_struct *p)
+{
+	return p != NULL && p->cos.is_dying;
+}
+
 void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct task_struct *next) 
 {
 	
@@ -601,30 +616,21 @@ void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct tas
 //==================================cos调度类钩子函数=====================================
 
 void enqueue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
-	// rq->cos.lord = p;
-	// printk("enqueue_task_cos  %d  cpu %d\n", p->pid, task_cpu(p));
-	if (p == rq->cos.lord) {
-		// rq->cos.lord_on_rq = 1;
+	if (p == rq->cos.lord) 
 		lord_on_rq = 1;
-		// 666
-		// printk("shizheli! %d %d\n", rq->cos.lord_on_rq, p->__state);
-	}
 	p->cos.is_blocked = 0;
 	produce_task_runnable_msg(p);
 }
 
 void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
-	// rq->cos.lord = NULL;
-	// printk("dequeue_task_cos  %d  cpu %d\n", p->pid, task_cpu(p));
-	if (p == rq->cos.lord) {
-		// rq->cos.lord_on_rq = 0;
+	if (p == rq->cos.lord) 
 		lord_on_rq = 0;
-	}
 
 	ulong lock_flags;
 	spin_lock_irqsave(&rq->cos.lock, lock_flags);
 	if (p == rq->cos.next_to_sched) {
 		rq->cos.next_to_sched = NULL;
+		// printk("set blocked %d\n", p->pid);
 	}
 	spin_unlock_irqrestore(&rq->cos.lock, lock_flags);
 
@@ -664,8 +670,10 @@ void task_dead_cos(struct task_struct *p) {
 
 	ulong flags;
 	spin_lock_irqsave(&rq->cos.lock, flags);
-	if (rq->cos.next_to_sched == p) 
+	if (rq->cos.next_to_sched == p) {
+		// printk("set dead %d\n", p->pid);
 		rq->cos.next_to_sched = NULL;
+	}
 	spin_unlock_irqrestore(&rq->cos.lock, flags);
 
 	if (p->__state == TASK_DEAD) 

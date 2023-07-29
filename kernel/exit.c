@@ -74,8 +74,6 @@
 #include <asm/unistd.h>
 #include <asm/mmu_context.h>
 
-// SCHED_CLASS_COS
-// #include "sched/cos.h"
 
 /*
  * The default value should be high enough to not crash a system that randomly
@@ -816,7 +814,7 @@ void __noreturn do_exit(long code)
 	// SCHED_CLASS_COS
 	if (tsk->policy == SCHED_COS) {
 		printk("exit start %d\n", tsk->pid);
-		// produce_task_dead_msg(tsk);
+		tsk->cos.is_dying = 1;
 	}
 	int group_dead;
 

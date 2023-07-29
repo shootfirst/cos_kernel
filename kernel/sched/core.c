@@ -2207,7 +2207,7 @@ void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags)
 {
 	if (p->sched_class == rq->curr->sched_class)
 		rq->curr->sched_class->check_preempt_curr(rq, p, flags);
-	else if (sched_class_above(p->sched_class, rq->curr->sched_class))
+	else if (sched_class_above(p->sched_class, rq->curr->sched_class) && !is_dying(rq->curr))
 		resched_curr(rq);
 
 // #ifdef CONFIG_SCHED_CLASS_COS
@@ -4873,6 +4873,7 @@ unsigned long to_ratio(u64 period, u64 runtime)
  * that must be done for every newly created context, then puts the task
  * on the runqueue and wakes it.
  */
+// dzh：pos 1
 void wake_up_new_task(struct task_struct *p)
 {
 	struct rq_flags rf;

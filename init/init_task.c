@@ -105,6 +105,7 @@ struct task_struct init_task
 	.cos		= {
 		.is_new    = 0,
 		.is_blocked    = 0,
+		.is_dying = 0,
 	},
 // #endif
 #endif
