@@ -618,8 +618,8 @@ void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct tas
 void enqueue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 	if (p == rq->cos.lord) 
 		lord_on_rq = 1;
-	p->cos.is_blocked = 0;
-	produce_task_runnable_msg(p);
+	// p->cos.is_blocked = 0;
+	// produce_task_runnable_msg(p);
 }
 
 void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
@@ -628,14 +628,15 @@ void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 
 	ulong lock_flags;
 	spin_lock_irqsave(&rq->cos.lock, lock_flags);
-	if (p == rq->cos.next_to_sched) {
+	if (p == rq->cos.next_to_sched && (flags & DEQUEUE_SLEEP)) {
 		rq->cos.next_to_sched = NULL;
-		// printk("set blocked %d\n", p->pid);
+		p->cos.is_blocked = 1;
+		produce_task_blocked_msg(p);
+		// printk("set blocked %d, flag %x\n", p->pid, flags);
+		// dump_stack();
 	}
 	spin_unlock_irqrestore(&rq->cos.lock, lock_flags);
-
-	p->cos.is_blocked = 1;
-	produce_task_blocked_msg(p);
+	
 }
 
 struct task_struct *pick_next_task_cos(struct rq *rq) {
@@ -689,6 +690,12 @@ int select_task_rq_cos(struct task_struct *p, int task_cpu, int flags)
 		return lord_cpu;
 	}
 	return lord_cpu;
+}
+
+void task_woken_cos(struct rq *this_rq, struct task_struct *task)
+{
+	task->cos.is_blocked = 0;
+	produce_task_runnable_msg(task);
 }
 
 void yield_task_cos(struct rq *rq) 
@@ -800,6 +807,7 @@ DEFINE_SCHED_CLASS(cos) = {
 
 	.rq_online		= rq_online_cos,
 	.rq_offline		= rq_offline_cos,
+	.task_woken     = task_woken_cos,
 #endif
 
 #ifdef CONFIG_SCHED_CORE
