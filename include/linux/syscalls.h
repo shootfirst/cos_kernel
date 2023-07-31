@@ -720,6 +720,11 @@ asmlinkage long sys_init_shoot();
 asmlinkage long sys_shoot_task(unsigned int len,
 					unsigned long __user *user_mask_ptr);
 
+asmlinkage long sys_coscg_create();
+asmlinkage long sys_coscg_ctl(int coscg_id, pid_t pid, int mode);
+asmlinkage long sys_coscg_rate(int coscg_id, int rate);
+asmlinkage long sys_coscg_delete(int coscg_id);
+
 /* kernel/signal.c */
 asmlinkage long sys_restart_syscall(void);
 asmlinkage long sys_kill(pid_t pid, int sig);

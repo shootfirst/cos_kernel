@@ -380,6 +380,11 @@
 454 common  init_shoot    sys_init_shoot
 455 common  shoot_task    sys_shoot_task
 
+456 common  coscg_create    sys_coscg_create
+457 common  coscg_ctl    sys_coscg_ctl
+458 common  coscg_rate    sys_coscg_rate 
+459 common  coscg_delete    sys_coscg_delete
+
 #
 # Due to a historical design error, certain syscalls are numbered differently
 # in x32 as compared to native x86_64.  These syscalls have numbers 512-547.

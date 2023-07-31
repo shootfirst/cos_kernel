@@ -8107,6 +8107,30 @@ void cos_local_shoot(void)
 }
 //==================================SCHED_CLASS_COS=================================
 
+//==================================SCHED_CLASS_COS=================================
+
+static int do_coscg_create(void) 
+{
+	return cos_do_coscg_create();
+}
+
+static int do_coscg_ctl(int coscg_id, pid_t pid, int mode)
+{
+	return cos_do_coscg_ctl(coscg_id, pid, mode);
+}
+
+static int do_coscg_rate(int coscg_id, int rate)
+{
+	return cos_do_coscg_rate(coscg_id, rate);
+}
+
+static int do_coscg_delete(int cos_cgid)
+{
+	return cos_do_coscg_delete(cos_cgid);
+}
+
+//==================================SCHED_CLASS_COS=================================
+
 
 
 /*
@@ -8210,6 +8234,50 @@ SYSCALL_DEFINE0(create_mq)
 SYSCALL_DEFINE0(init_shoot)
 {
 	return do_init_shoot();
+}
+//===============================SCHED_CLASS_COS==============================
+
+
+//===============================SCHED_CLASS_COS==============================
+/**
+ * sys_cos_create_cgroup
+ * @cpu_id: the cpu id in question.
+ *
+ * Return: 
+ */
+SYSCALL_DEFINE0(coscg_create)
+{
+	return do_coscg_create();
+}
+
+/**
+ * sys_cos_ctl_cgroup
+ *
+ * Return:
+ */
+SYSCALL_DEFINE3(coscg_ctl, int, coscg_id, pid_t, pid, int, mode)
+{
+	return do_coscg_ctl(coscg_id, pid, mode);
+}
+
+/**
+ * sys_cos_rate_cgroup
+ *
+ * Return:
+ */
+SYSCALL_DEFINE2(coscg_rate, int, coscg_id, int, rate)
+{
+	return do_coscg_rate(coscg_id, rate);
+}
+
+/**
+ * sys_cos_delete_cgroup
+ *
+ * Return:
+ */
+SYSCALL_DEFINE1(coscg_delete, int, cos_cgid)
+{
+	return do_coscg_delete(cos_cgid);
 }
 //===============================SCHED_CLASS_COS==============================
 
