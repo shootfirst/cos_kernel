@@ -675,6 +675,9 @@ int coscg_should_offcpu(struct rq *rq, struct task_struct *p)
 
 int cos_do_coscg_create(void)
 {
+	if (!cos_on)
+		return -EINVAL;
+
 	ulong lock_flags;
 	spin_lock_irqsave(&coscg_lock, lock_flags);
 
@@ -696,6 +699,9 @@ int cos_do_coscg_create(void)
 
 int cos_do_coscg_delete(int coscg_id)
 {
+	if (!cos_on)
+		return -EINVAL;
+
 	struct task_struct *p;
 	struct list_head *ele;
 
@@ -725,6 +731,9 @@ int cos_do_coscg_delete(int coscg_id)
 
 int cos_do_coscg_rate(int coscg_id, int rate)
 {
+	if (!cos_on)
+		return -EINVAL;
+
 	ulong lock_flags;
 	spin_lock_irqsave(&coscg_lock, lock_flags);
 
@@ -744,6 +753,9 @@ int cos_do_coscg_rate(int coscg_id, int rate)
 
 int cos_do_coscg_ctl(int coscg_id, pid_t pid, int mode)
 {
+	if (!cos_on)
+		return -EINVAL;
+		
 	struct task_struct *p;
 
 	ulong lock_flags;
