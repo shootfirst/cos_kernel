@@ -769,10 +769,10 @@ int cos_do_coscg_ctl(int coscg_id, pid_t pid, int mode)
 
 	spin_lock_irqsave(&coscg->lock, lock_flags);
 
-	if (mode == _COS_CGROUP_TASK_ADD) {
+	if (mode == _COS_CGROUP_TASK_ADD && !p->cos.coscg) {
 		list_add_tail(&p->tasks, &coscg->task_list);
 		p->cos.coscg = coscg;
-	} else if (mode == _COS_CGROUP_TASK_DELETE) {
+	} else if (mode == _COS_CGROUP_TASK_DELETE && p->cos.coscg) {
 		list_del(&p->tasks);
 		p->cos.coscg = NULL;
 	} else {
