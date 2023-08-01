@@ -53,7 +53,7 @@ struct cos_shoot_area {
 #define _COS_CGROUP_TASK_DELETE  2
 
 #define _COS_CGROUP_MAX_RATE 100
-#define _COS_CGROUP_INTERVAL_NS 1000000
+#define _COS_CGROUP_INTERVAL_NS 10000000
 
 struct cos_cgroup {
 	u_int64_t coscg_id;

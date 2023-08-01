@@ -4,6 +4,8 @@
 #include <linux/file.h>
 #include <linux/anon_inodes.h>
 
+#include <linux/hrtimer.h>
+
 #include "sched.h"
 
 // =======================================全局变量===========================================
@@ -23,6 +25,9 @@ int lord_on_rq = 0;
 struct rhashtable coscg_hash;
 int next_coscg_id = 0;
 spinlock_t coscg_lock; // protect above 2
+
+static struct hrtimer coscg_timer;
+ktime_t kt;
 
 
 
@@ -45,6 +50,53 @@ static struct task_struct *find_process_by_pid(pid_t pid)
 
 
 // =======================================cos全局==========================================
+void coscg_pay_salary(void)
+{
+	struct rhashtable_iter iter;
+	struct cos_cgroup *coscg;
+
+	rhashtable_walk_enter(&coscg_hash, &iter);
+	do {
+		rhashtable_walk_start(&iter);
+
+		coscg = rhashtable_walk_next(&iter);
+		while (!IS_ERR_OR_NULL(coscg)) {
+			
+			ulong flags;
+			spin_lock_irqsave(&coscg->lock, flags);
+			coscg->salary = coscg->rate * _COS_CGROUP_INTERVAL_NS / _COS_CGROUP_MAX_RATE;
+			spin_unlock_irqrestore(&coscg->lock, flags);
+
+			coscg = rhashtable_walk_next(&iter);
+		}
+
+		rhashtable_walk_stop(&iter);
+	} while (coscg == ERR_PTR(-EAGAIN));
+	rhashtable_walk_exit(&iter);
+}
+
+static enum hrtimer_restart htimer_handler(struct hrtimer *timer)
+{
+	printk("pay\n");
+    hrtimer_forward(timer, timer->base->get_time(), kt);
+	coscg_pay_salary();
+    return HRTIMER_RESTART;
+}
+ 
+static int coscg_timer_init(void)
+{
+    kt = ktime_set(0, _COS_CGROUP_INTERVAL_NS);
+    hrtimer_init(&coscg_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+    hrtimer_start(&coscg_timer, kt, HRTIMER_MODE_REL);
+    coscg_timer.function = htimer_handler;
+    return 0;
+}
+ 
+static void coscg_timer_exit(void)
+{
+    hrtimer_cancel(&coscg_timer);
+}
+
 /* must under cos_global_lock locked */
 void open_cos(struct rq *rq, struct task_struct *p, int cpu_id) 
 {
@@ -59,6 +111,7 @@ void open_cos(struct rq *rq, struct task_struct *p, int cpu_id)
 
 	BUG_ON(rhashtable_init(&coscg_hash, &coscg_hash_params));
 	spin_lock_init(&coscg_lock);
+	coscg_timer_init();
 }
 
 /* must under cos_global_lock locked */
@@ -575,6 +628,7 @@ int cos_do_shoot_task(cpumask_var_t shoot_mask)
 
 
 //============================================cgroup==================================================
+
 void update_before_oncpu(struct rq *rq, struct task_struct *p)
 {
 	if (!cos_policy(p->policy))
@@ -617,6 +671,7 @@ int coscg_should_offcpu(struct rq *rq, struct task_struct *p)
 	
 	return 0;
 }
+
 
 
 int cos_do_coscg_create(void)
