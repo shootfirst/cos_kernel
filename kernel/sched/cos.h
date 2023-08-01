@@ -1,3 +1,6 @@
+#include <linux/rhashtable.h>
+#include <linux/list.h>
+
 //================================mq=====================================
 #define _MAX_SEQ_NUM ((1 << 16) - 1)
 
@@ -29,10 +32,11 @@ struct cos_message_queue {
 //================================mq=====================================
 
 
-//================================init_shoot=====================================
+//================================shoot area=====================================
 #define _SHOOT_AREA_SIZE 511
 #define _SA_RIGHT 0
 #define _SA_ERROR 1
+#define _SA_CGRUNOUT 2
 struct cos_shoot_arg {
 	u_int32_t pid;
 	u_int32_t info;
@@ -42,7 +46,32 @@ struct cos_shoot_area {
 	u_int64_t seq;
 	struct cos_shoot_arg area[_SHOOT_AREA_SIZE];
 };
-//================================init_shoot=====================================
+//================================shoot area=====================================
+
+//================================coscg=============================================
+#define _COS_CGROUP_TASK_ADD     1
+#define _COS_CGROUP_TASK_DELETE  2
+
+#define _COS_CGROUP_MAX_RATE 100
+#define _COS_CGROUP_INTERVAL_NS 1000000
+
+struct cos_cgroup {
+	u_int64_t coscg_id;
+	struct rhash_head hash_node;
+
+	int rate;
+	
+	int64_t salary; // set by timer and its task
+	struct list_head task_list; // set by lord and task dead
+	spinlock_t lock; // protect salary task_list and rate
+};
+
+static const struct rhashtable_params coscg_hash_params = {
+	.key_len		= 8,
+	.key_offset		= offsetof(struct cos_cgroup, coscg_id),
+	.head_offset		= offsetof(struct cos_cgroup, hash_node),
+};
+//================================coscg=============================================
 
 
 
@@ -61,5 +90,9 @@ int cos_do_create_mq(void);
 int cos_do_init_shoot(void);
 int cos_do_shoot_task(cpumask_var_t shoot_mask);
 
+int cos_do_coscg_create(void);
+int cos_do_coscg_ctl(int coscg_id, pid_t pid, int mode);
+int cos_do_coscg_rate(int coscg_id, int rate);
+int cos_do_coscg_delete(int coscg_id);
 
 

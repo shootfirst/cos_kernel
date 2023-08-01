@@ -27,7 +27,13 @@ u_int16_t global_seq = 0;
 DEFINE_SPINLOCK(cos_mq_lock);
 
 struct cos_shoot_area *task_shoot_area; /* Only lord cpu will access it */
+
 int lord_on_rq = 0;
+
+struct rhashtable coscg_hash;
+int next_coscg_id = 0;
+spinlock_t coscg_lock; // protect above 2
+
 
 // =====================================全局变量结束=========================================
 
@@ -76,6 +82,9 @@ void open_cos(struct rq *rq, struct task_struct *p, int cpu_id)
 	lord = p;
 	BUG_ON(cos_on == 1);
 	cos_on = 1;
+
+	BUG_ON(rhashtable_init(&coscg_hash, &coscg_hash_params));
+	spin_lock_init(&coscg_lock);
 }
 
 int cos_do_set_lord(int cpu_id) 
@@ -520,6 +529,121 @@ int cos_do_shoot_task(cpumask_var_t shoot_mask)
 }
 //============================================shoot=======================================================
 
+//============================================cgroup==================================================
+int cos_do_coscg_create(void)
+{
+	ulong lock_flags;
+	spin_lock_irqsave(&coscg_lock, lock_flags);
+
+	struct cos_cgroup *create = kmalloc(sizeof(*create), GFP_KERNEL);
+	create->coscg_id = next_coscg_id;
+	create->rate = 0;
+	create->salary = 0;
+	spin_lock_init(&create->lock);
+	INIT_LIST_HEAD(&create->task_list);
+	rhashtable_insert_fast(&coscg_hash, &create->hash_node, coscg_hash_params);
+	next_coscg_id++;
+
+	spin_unlock_irqrestore(&coscg_lock, lock_flags);
+
+	return create->coscg_id;
+}
+
+
+
+int cos_do_coscg_delete(int coscg_id)
+{
+	struct task_struct *p;
+	struct list_head *ele;
+
+	ulong lock_flags;
+	spin_lock_irqsave(&coscg_lock, lock_flags);
+
+	struct cos_cgroup *remove = rhashtable_lookup_fast(&coscg_hash, &coscg_id, coscg_hash_params);
+	if (!remove) {
+		spin_unlock_irqrestore(&coscg_lock, lock_flags);
+		return -EINVAL;
+	}
+	rhashtable_remove_fast(&coscg_hash, &remove->hash_node, coscg_hash_params);
+
+	spin_unlock_irqrestore(&coscg_lock, lock_flags);
+
+
+	list_for_each(ele, &remove->task_list) {
+		p = list_entry(ele, struct task_struct, tasks);
+		p->cos.coscg = NULL;
+	}
+	
+	kfree(remove);
+	return 0;
+}
+
+
+
+int cos_do_coscg_rate(int coscg_id, int rate)
+{
+	ulong lock_flags;
+	spin_lock_irqsave(&coscg_lock, lock_flags);
+
+	struct cos_cgroup *coscg = rhashtable_lookup_fast(&coscg_hash, &coscg_id, coscg_hash_params);
+	if (!coscg) {
+		spin_unlock_irqrestore(&coscg_lock, lock_flags);
+		return -EINVAL;
+	}
+	coscg->rate = rate;
+	
+	spin_unlock_irqrestore(&coscg_lock, lock_flags);
+
+	return 0;
+}
+
+
+
+int cos_do_coscg_ctl(int coscg_id, pid_t pid, int mode)
+{
+	struct task_struct *p;
+
+	ulong lock_flags;
+	spin_lock_irqsave(&coscg_lock, lock_flags);
+
+	struct cos_cgroup *coscg = rhashtable_lookup_fast(&coscg_hash, &coscg_id, coscg_hash_params);
+	if (!coscg) {
+		spin_unlock_irqrestore(&coscg_lock, lock_flags);
+		return -EINVAL;
+	}
+
+	spin_unlock_irqrestore(&coscg_lock, lock_flags);
+	
+	rcu_read_lock();
+	p = find_process_by_pid(pid);
+	if (unlikely(!p)) {
+		rcu_read_unlock();
+		return -EINVAL;
+	}
+	get_task_struct(p);
+	rcu_read_unlock();
+
+
+	spin_lock_irqsave(&coscg->lock, lock_flags);
+
+	if (mode == _COS_CGROUP_TASK_ADD) {
+		list_add_tail(&p->tasks, &coscg->task_list);
+		p->cos.coscg = coscg;
+	} else if (mode == _COS_CGROUP_TASK_DELETE) {
+		list_del(&p->tasks);
+		p->cos.coscg = NULL;
+	} else {
+		spin_unlock_irqrestore(&coscg->lock, lock_flags);
+		return -EINVAL;
+	}
+
+	spin_unlock_irqrestore(&coscg->lock, lock_flags);
+
+	return 0;
+}
+//============================================cgroup==================================================
+
+
 //====================================系统调用函数结束=======================================
 
 //==========================================cos辅助函数=========================================
@@ -615,14 +739,16 @@ void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct tas
 
 //==================================cos调度类钩子函数=====================================
 
-void enqueue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
+void enqueue_task_cos(struct rq *rq, struct task_struct *p, int flags) 
+{
 	if (p == rq->cos.lord) 
 		lord_on_rq = 1;
 	// p->cos.is_blocked = 0;
 	// produce_task_runnable_msg(p);
 }
 
-void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
+void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) 
+{
 	if (p == rq->cos.lord) 
 		lord_on_rq = 0;
 
@@ -639,7 +765,8 @@ void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags) {
 	
 }
 
-struct task_struct *pick_next_task_cos(struct rq *rq) {
+struct task_struct *pick_next_task_cos(struct rq *rq) 
+{
 
 	ulong flags;
 	spin_lock_irqsave(&rq->cos.lock, flags);
@@ -655,7 +782,8 @@ struct task_struct *pick_next_task_cos(struct rq *rq) {
 	return NULL;
 }
 
-void task_dead_cos(struct task_struct *p) {
+void task_dead_cos(struct task_struct *p) 
+{
 	preempt_disable();
 	struct rq *rq;
 	int cpu;
@@ -667,6 +795,14 @@ void task_dead_cos(struct task_struct *p) {
 		spin_lock_irqsave(&cos_global_lock, flags);
 		close_cos(rq);
 		spin_unlock_irqrestore(&cos_global_lock, flags);
+	}
+
+	if (p->cos.coscg) {
+		ulong lock_flags;
+		spin_lock_irqsave(&p->cos.coscg->lock, lock_flags);
+		list_del(&p->tasks);
+		spin_unlock_irqrestore(&p->cos.coscg->lock, lock_flags);
+		p->cos.coscg = NULL;
 	}
 
 	ulong flags;
@@ -834,7 +970,6 @@ struct task_struct *pick_next_task_cos_lord(struct rq *rq) {
 	ulong flags;
 	spin_lock_irqsave(&rq->cos.lock, flags);
 	if (rq->cos.next_to_sched != NULL && task_is_running(rq->cos.next_to_sched) && rq->cos.is_shoot_first) {
-		// 动态优先级提升！！！！！！！！！
 		rq->cos.is_shoot_first = 0;
 		spin_unlock_irqrestore(&rq->cos.lock, flags);
 		return rq->cos.next_to_sched;
