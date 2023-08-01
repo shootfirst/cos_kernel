@@ -2,7 +2,7 @@
 #include <linux/list.h>
 
 //================================mq=====================================
-#define _MAX_SEQ_NUM ((1 << 16) - 1)
+#define _MAX_SEQ_NUM ((1ULL << 32) - 1)
 
 /* cos message type */
 #define _MSG_TASK_FIRST	1
@@ -19,9 +19,9 @@ enum {
 #define _MQ_SIZE 511
 
 struct cos_msg {
-	u_int32_t pid;
+	u_int16_t pid;
 	u_int16_t type;
-	u_int16_t seq;
+	u_int32_t seq;
 };
 
 struct cos_message_queue {

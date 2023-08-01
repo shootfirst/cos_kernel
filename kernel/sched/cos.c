@@ -581,8 +581,7 @@ int cos_do_shoot_task(cpumask_var_t shoot_mask)
 				spin_unlock_irqrestore(&rq->cos.lock, flags);
 				printk("task %d is dying, can not be shot!\n", p->pid, cpu_id);
 				continue;
-			} else 
-				produce_task_cos_preempt_msg(rq->cos.next_to_sched);
+			}
 		}
  		rq->cos.next_to_sched = p; 
 		rq->cos.is_shoot_first = 1;
@@ -854,12 +853,14 @@ void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct tas
 
 	printk("preempt by %d sched_class %d\n", next->pid, next->policy);
 
-	if (!cos_policy(next->policy)) {
+	if (!prev->cos.coscg || prev->cos.coscg->salary < 0) 
+		return;
 
-		if (!prev->cos.coscg || prev->cos.coscg->salary > 0)
-			produce_task_preempt_msg(prev);
-			
-	}
+	if (cos_policy(next->policy)) 
+		produce_task_cos_preempt_msg(prev);
+	else 
+		produce_task_preempt_msg(prev);
+		
 }
 
 
