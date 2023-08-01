@@ -460,6 +460,12 @@ int cos_do_shoot_task(cpumask_var_t shoot_mask)
 		get_task_struct(p);
 		rcu_read_unlock();
 
+		
+		if (p->cos.coscg && p->cos.coscg->salary <= 0) {
+			task_shoot_area->area[cpu_id].info = _SA_CGRUNOUT;
+			continue;
+		}
+
 		if (unlikely(p->cos.is_dying)) {
 			task_shoot_area->area[cpu_id].info = _SA_ERROR;
 			// printk("task %d is dying, can not be shot!\n", p->pid, cpu_id);
@@ -668,6 +674,51 @@ void close_cos(struct rq *rq)
 		global_mq = NULL;
 	}
 }
+
+void update_before_oncpu(struct rq *rq, struct task_struct *p)
+{
+	if (!cos_policy(p->policy))
+		return;
+	p->se.exec_start = rq_clock_task(rq);
+}
+
+void update_after_offcpu(struct rq *rq, struct task_struct *p)
+{
+	u64 delta, now;
+
+	if (!cos_policy(p->policy))
+		return;
+
+	VM_BUG_ON(!p->se.exec_start);
+
+	now = rq_clock_task(rq);
+	delta = now - p->se.exec_start;
+	if ((s64)delta > 0 && p->cos.coscg) {
+		ulong lock_flags;
+		spin_lock_irqsave(&p->cos.coscg->lock, lock_flags);
+		p->cos.coscg->salary -= delta;
+		spin_unlock_irqrestore(&p->cos.coscg->lock, lock_flags);
+	}
+}
+
+int coscg_should_offcpu(struct rq *rq, struct task_struct *p)
+{
+	u64 delta, now;
+
+	if (!cos_policy(p->policy))
+		return 0;
+
+	VM_BUG_ON(!p->se.exec_start);
+
+	now = rq_clock_task(rq);
+	delta = now - p->se.exec_start;
+	if ((s64)delta > 0 && p->cos.coscg) 
+		return p->cos.coscg->salary - delta <= 0;
+	
+	return 0;
+}
+
+
 //==========================================cos辅助函数结束=========================================
 
 //==================================供core.c使用的函数=====================================
@@ -693,13 +744,18 @@ bool is_dying(struct task_struct *p)
 void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct task_struct *next) 
 {
 	
-	if (!cos_policy(prev->policy)) {
+	if (!cos_policy(prev->policy)) 
 		return;
-	}
 
-	if (is_lord(prev)) {
+	if (is_lord(prev))
 		return;
-	}
+
+	if (cos_policy(prev->policy)) 
+		update_after_offcpu(rq, next);
+	
+	if (cos_policy(next->policy))
+		update_before_oncpu(rq, prev);
+		
 
 	if (prev->cos.is_new) {
 		if (task_on_rq_queued(prev)) {
@@ -729,11 +785,14 @@ void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct tas
 	printk("preempt by %d sched_class %d\n", next->pid, next->policy);
 
 	if (!cos_policy(next->policy)) {
-		produce_task_preempt_msg(prev);
-	}
 
-	
+		if (!prev->cos.coscg || prev->cos.coscg->salary > 0)
+			produce_task_preempt_msg(prev);
+			
+	}
 }
+
+
 
 //==================================供core.c使用的函数=====================================
 
@@ -771,6 +830,12 @@ struct task_struct *pick_next_task_cos(struct rq *rq)
 	ulong flags;
 	spin_lock_irqsave(&rq->cos.lock, flags);
 	if (rq->cos.next_to_sched != NULL && task_is_running(rq->cos.next_to_sched)) {
+
+		if (rq->cos.next_to_sched->cos.coscg && rq->cos.next_to_sched->cos.coscg->salary <= 0) {
+			spin_unlock_irqrestore(&rq->cos.lock, flags);
+			return NULL;
+		}
+
 		spin_unlock_irqrestore(&rq->cos.lock, flags);
 		return rq->cos.next_to_sched;
 	}
@@ -889,7 +954,11 @@ struct task_struct * pick_task_cos(struct rq *rq)
 
 void task_tick_cos(struct rq *rq, struct task_struct *p, int queued) 
 {
-	// printk("task_tick_cos\n");
+	if (coscg_should_offcpu(rq, p)) {
+		set_tsk_need_resched(p);
+		set_preempt_need_resched();
+		return;
+	}
 }
 
 void switched_to_cos(struct rq *this_rq, struct task_struct *task) 
