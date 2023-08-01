@@ -1,19 +1,9 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/*
- * BPF extensible scheduler class: Documentation/scheduler/sched-ext.rst
- *
- * Copyright (c) 2022 Meta Platforms, Inc. and affiliates.
- * Copyright (c) 2022 Tejun Heo <tj@kernel.org>
- * Copyright (c) 2022 David Vernet <dvernet@meta.com>
- */
-
 // CONFIG_SCHED_CLASS_COS
 
 #include <linux/mm.h>
 #include <linux/file.h>
 #include <linux/anon_inodes.h>
 
-// #include <asm/ptrace.h>
 #include "sched.h"
 
 // =======================================全局变量===========================================
@@ -35,9 +25,11 @@ int next_coscg_id = 0;
 spinlock_t coscg_lock; // protect above 2
 
 
-// =====================================全局变量结束=========================================
 
-// =====================================core.c=============================================
+
+
+
+// =====================================工具=============================================
 /**
  * find_process_by_pid - find a process with a matching PID value.
  * used in sys_sched_set/getaffinity() in kernel/sched/core.c, so
@@ -47,10 +39,55 @@ static struct task_struct *find_process_by_pid(pid_t pid)
 {
 	return pid ? find_task_by_vpid(pid) : current;
 }
-// =====================================core.c=============================================
 
 
-// =====================================系统调用函数=========================================
+
+
+
+// =======================================cos全局==========================================
+/* must under cos_global_lock locked */
+void open_cos(struct rq *rq, struct task_struct *p, int cpu_id) 
+{
+	rq->cos.lord = p; 
+	// rq->cos.lord_on_rq = 1;
+	lord_on_rq = 1;
+	lord_cpu = cpu_id;
+	BUG_ON(lord);
+	lord = p;
+	BUG_ON(cos_on == 1);
+	cos_on = 1;
+
+	BUG_ON(rhashtable_init(&coscg_hash, &coscg_hash_params));
+	spin_lock_init(&coscg_lock);
+}
+
+/* must under cos_global_lock locked */
+void close_cos(struct rq *rq) 
+{
+	rq->cos.lord = NULL; 
+	// rq->cos.lord_on_rq = 0;
+	lord_on_rq = 0;
+	lord_cpu = 1;
+	lord = NULL;
+	BUG_ON(cos_on == 0);
+	cos_on = 0;
+
+	if (task_shoot_area) {
+		vfree(task_shoot_area);
+		task_shoot_area = NULL; 
+	}
+	
+	if (global_mq) {
+		vfree(global_mq);
+		global_mq = NULL;
+	}
+}
+
+
+
+
+
+
 //=====================================lord=======================================
 int cos_move2target_rq(int cpu_id) 
 {
@@ -71,21 +108,7 @@ int cos_move2target_rq(int cpu_id)
 	return ret;
 }
 
-/* must under cos_global_lock locked */
-void open_cos(struct rq *rq, struct task_struct *p, int cpu_id) 
-{
-	rq->cos.lord = p; 
-	// rq->cos.lord_on_rq = 1;
-	lord_on_rq = 1;
-	lord_cpu = cpu_id;
-	BUG_ON(lord);
-	lord = p;
-	BUG_ON(cos_on == 1);
-	cos_on = 1;
 
-	BUG_ON(rhashtable_init(&coscg_hash, &coscg_hash_params));
-	spin_lock_init(&coscg_lock);
-}
 
 int cos_do_set_lord(int cpu_id) 
 {
@@ -148,7 +171,10 @@ move_fail:
 	return retval;
 }
 
-//=====================================lord=======================================
+
+
+
+
 
 //===================================共享内存相关=====================================
 static int _cos_mmap_common(struct vm_area_struct *vma, ulong mapsize)
@@ -230,7 +256,10 @@ static const struct file_operations queue_fops = {
 	.mmap			= queue_mmap,
 };
 
-//===================================共享内存相关=====================================
+
+
+
+
 
 //=====================================mq=========================================
 int _produce(struct cos_msg *msg) 
@@ -371,9 +400,12 @@ int cos_do_create_mq(void)
 	return fd;
 }
 
-//=====================================mq=========================================
 
-//============================================init_shoot===================================================
+
+
+
+
+//============================================shoot area===================================================
 
 int cos_create_shoot_area(void) 
 {
@@ -407,7 +439,10 @@ int cos_do_init_shoot(void)
 	return fd;
 }
 
-//============================================init_shoot===================================================
+
+
+
+
 
 //============================================shoot=======================================================
 int cos_do_shoot_task(cpumask_var_t shoot_mask) 
@@ -533,9 +568,57 @@ int cos_do_shoot_task(cpumask_var_t shoot_mask)
 
 	return 0;
 }
-//============================================shoot=======================================================
+
+
+
+
+
 
 //============================================cgroup==================================================
+void update_before_oncpu(struct rq *rq, struct task_struct *p)
+{
+	if (!cos_policy(p->policy))
+		return;
+	p->se.exec_start = rq_clock_task(rq);
+}
+
+void update_after_offcpu(struct rq *rq, struct task_struct *p)
+{
+	u64 delta, now;
+
+	if (!cos_policy(p->policy))
+		return;
+
+	VM_BUG_ON(!p->se.exec_start);
+
+	now = rq_clock_task(rq);
+	delta = now - p->se.exec_start;
+	if ((s64)delta > 0 && p->cos.coscg) {
+		ulong lock_flags;
+		spin_lock_irqsave(&p->cos.coscg->lock, lock_flags);
+		p->cos.coscg->salary -= delta;
+		spin_unlock_irqrestore(&p->cos.coscg->lock, lock_flags);
+	}
+}
+
+int coscg_should_offcpu(struct rq *rq, struct task_struct *p)
+{
+	u64 delta, now;
+
+	if (!cos_policy(p->policy))
+		return 0;
+
+	VM_BUG_ON(!p->se.exec_start);
+
+	now = rq_clock_task(rq);
+	delta = now - p->se.exec_start;
+	if ((s64)delta > 0 && p->cos.coscg) 
+		return p->cos.coscg->salary - delta <= 0;
+	
+	return 0;
+}
+
+
 int cos_do_coscg_create(void)
 {
 	ulong lock_flags;
@@ -647,81 +730,13 @@ int cos_do_coscg_ctl(int coscg_id, pid_t pid, int mode)
 
 	return 0;
 }
-//============================================cgroup==================================================
 
 
-//====================================系统调用函数结束=======================================
-
-//==========================================cos辅助函数=========================================
-/* must under cos_global_lock locked */
-void close_cos(struct rq *rq) 
-{
-	rq->cos.lord = NULL; 
-	// rq->cos.lord_on_rq = 0;
-	lord_on_rq = 0;
-	lord_cpu = 1;
-	lord = NULL;
-	BUG_ON(cos_on == 0);
-	cos_on = 0;
-
-	if (task_shoot_area) {
-		vfree(task_shoot_area);
-		task_shoot_area = NULL; 
-	}
-	
-	if (global_mq) {
-		vfree(global_mq);
-		global_mq = NULL;
-	}
-}
-
-void update_before_oncpu(struct rq *rq, struct task_struct *p)
-{
-	if (!cos_policy(p->policy))
-		return;
-	p->se.exec_start = rq_clock_task(rq);
-}
-
-void update_after_offcpu(struct rq *rq, struct task_struct *p)
-{
-	u64 delta, now;
-
-	if (!cos_policy(p->policy))
-		return;
-
-	VM_BUG_ON(!p->se.exec_start);
-
-	now = rq_clock_task(rq);
-	delta = now - p->se.exec_start;
-	if ((s64)delta > 0 && p->cos.coscg) {
-		ulong lock_flags;
-		spin_lock_irqsave(&p->cos.coscg->lock, lock_flags);
-		p->cos.coscg->salary -= delta;
-		spin_unlock_irqrestore(&p->cos.coscg->lock, lock_flags);
-	}
-}
-
-int coscg_should_offcpu(struct rq *rq, struct task_struct *p)
-{
-	u64 delta, now;
-
-	if (!cos_policy(p->policy))
-		return 0;
-
-	VM_BUG_ON(!p->se.exec_start);
-
-	now = rq_clock_task(rq);
-	delta = now - p->se.exec_start;
-	if ((s64)delta > 0 && p->cos.coscg) 
-		return p->cos.coscg->salary - delta <= 0;
-	
-	return 0;
-}
 
 
-//==========================================cos辅助函数结束=========================================
 
-//==================================供core.c使用的函数=====================================
+
+//==================================core.c使用的函数=====================================
 
 void init_cos_rq(struct cos_rq *cos_rq) 
 {
@@ -794,9 +809,10 @@ void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct tas
 
 
 
-//==================================供core.c使用的函数=====================================
 
-//==================================cos调度类钩子函数=====================================
+
+
+//==================================cos调度类=====================================
 
 void enqueue_task_cos(struct rq *rq, struct task_struct *p, int flags) 
 {
@@ -976,21 +992,6 @@ void update_curr_cos(struct rq *rq)
 	printk("update_curr_cos\n");
 }
 
-/*
- * Omitted operations:
- *
- * - check_preempt_curr: NOOP as it isn't useful in the wakeup path because the
- *   task isn't tied to the CPU at that point. Preemption is implemented by
- *   resetting the victim task's slice to 0 and triggering reschedule on the
- *   target CPU.
- *
- * - migrate_task_rq: Unncessary as task to cpu mapping is transient.
- *
- * - task_fork/dead: We need fork/dead notifications for all tasks regardless of
- *   their current sched_class. Call them directly from sched core instead.
- *
- * - task_woken, switched_from: Unnecessary.
- */
 DEFINE_SCHED_CLASS(cos) = {
 	.enqueue_task		= enqueue_task_cos,
 	.dequeue_task		= dequeue_task_cos,
@@ -1031,9 +1032,12 @@ DEFINE_SCHED_CLASS(cos) = {
 #endif
 };
 
-//==================================cos调度类钩子函数结束=====================================
 
-//==================================cos lord调度类钩子函数=====================================
+
+
+
+
+//==================================cos lord调度类=====================================
 
 struct task_struct *pick_next_task_cos_lord(struct rq *rq) {
 	ulong flags;
@@ -1063,8 +1067,3 @@ DEFINE_SCHED_CLASS(cos_lord) = {
 	.balance		= balance_cos_lord,
 #endif
 };
-
-//==================================cos lord调度类钩子函数结束=====================================
-
-
-
