@@ -865,7 +865,7 @@ void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct tas
 
 	printk("preempt by %d sched_class %d\n", next->pid, next->policy);
 
-	if (!prev->cos.coscg || prev->cos.coscg->salary < 0) 
+	if (prev->cos.coscg && prev->cos.coscg->salary < 0) 
 		return;
 
 	if (cos_policy(next->policy)) 
