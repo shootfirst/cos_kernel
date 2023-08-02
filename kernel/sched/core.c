@@ -8344,7 +8344,6 @@ SYSCALL_DEFINE3(sched_setattr, pid_t, pid, struct sched_attr __user *, uattr,
  */
 SYSCALL_DEFINE1(sched_getscheduler, pid_t, pid)
 {
-	printk("sched_getscheduler start! %d\n", pid);
 	struct task_struct *p;
 	int retval;
 

@@ -65,6 +65,7 @@ void coscg_pay_salary(void)
 			ulong flags;
 			spin_lock_irqsave(&coscg->lock, flags);
 			coscg->salary = coscg->rate * _COS_CGROUP_INTERVAL_NS / _COS_CGROUP_MAX_RATE;
+			// printk("pay salary %d\n", coscg->salary);
 			spin_unlock_irqrestore(&coscg->lock, flags);
 
 			coscg = rhashtable_walk_next(&iter);
@@ -77,7 +78,6 @@ void coscg_pay_salary(void)
 
 static enum hrtimer_restart htimer_handler(struct hrtimer *timer)
 {
-	printk("pay\n");
     hrtimer_forward(timer, timer->base->get_time(), kt);
 	coscg_pay_salary();
     return HRTIMER_RESTART;
@@ -646,9 +646,11 @@ void update_after_offcpu(struct rq *rq, struct task_struct *p)
 
 	now = rq_clock_task(rq);
 	delta = now - p->se.exec_start;
+	printk("now %lld - p->se.exec_start %lld = %lld\n", now, p->se.exec_start, delta);
 	if ((s64)delta > 0 && p->cos.coscg) {
 		ulong lock_flags;
 		spin_lock_irqsave(&p->cos.coscg->lock, lock_flags);
+		printk("spend %d - %d\n", p->cos.coscg->salary, delta);
 		p->cos.coscg->salary -= delta;
 		spin_unlock_irqrestore(&p->cos.coscg->lock, lock_flags);
 	}
@@ -666,7 +668,7 @@ int coscg_should_offcpu(struct rq *rq, struct task_struct *p)
 	now = rq_clock_task(rq);
 	delta = now - p->se.exec_start;
 	if ((s64)delta > 0 && p->cos.coscg) 
-		return p->cos.coscg->salary - delta <= 0;
+		return p->cos.coscg->salary <= delta;
 	
 	return 0;
 }
@@ -831,13 +833,6 @@ void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct tas
 	if (is_lord(prev))
 		return;
 
-	if (cos_policy(prev->policy)) 
-		update_after_offcpu(rq, next);
-	
-	if (cos_policy(next->policy))
-		update_before_oncpu(rq, prev);
-		
-
 	if (prev->cos.is_new) {
 		if (task_on_rq_queued(prev)) {
 			produce_task_new_msg(prev);
@@ -848,6 +843,13 @@ void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct tas
 		prev->cos.is_new = 0;
 		return;
 	}
+
+	if (cos_policy(prev->policy)) {
+		update_after_offcpu(rq, prev);
+	}
+		
+	if (cos_policy(next->policy))
+		update_before_oncpu(rq, next);
 
 	if (prev->cos.is_blocked) {
 		return;
@@ -1041,7 +1043,6 @@ void task_tick_cos(struct rq *rq, struct task_struct *p, int queued)
 	if (coscg_should_offcpu(rq, p)) {
 		set_tsk_need_resched(p);
 		set_preempt_need_resched();
-		return;
 	}
 }
 
