@@ -64,8 +64,8 @@ void coscg_pay_salary(void)
 			
 			ulong flags;
 			spin_lock_irqsave(&coscg->lock, flags);
-			coscg->salary = coscg->rate * _COS_CGROUP_INTERVAL_NS / _COS_CGROUP_MAX_RATE;
-			// printk("pay salary %d\n", coscg->salary);
+			coscg->salary = (u64)coscg->rate * (_COS_CGROUP_INTERVAL_NS / _COS_CGROUP_MAX_RATE);
+			// printk("pay salary %lld\n",coscg->salary);
 			spin_unlock_irqrestore(&coscg->lock, flags);
 
 			coscg = rhashtable_walk_next(&iter);
@@ -630,24 +630,27 @@ int cos_do_shoot_task(cpumask_var_t shoot_mask)
 
 void update_before_oncpu(struct rq *rq, struct task_struct *p)
 {
-	if (!cos_policy(p->policy))
+	if (!cos_policy(p->policy) || !p->cos.coscg) {
+		// printk("p->pid %d, !cos_policy(p->policy) %d, !p->cos.coscg %d\n", p->pid, !cos_policy(p->policy), !p->cos.coscg);
 		return;
-	p->se.exec_start = rq_clock_task(rq);
+	}
+	p->cos.cos_exec_start = rq_clock_task(rq);
+	printk("p->cos.cos_exec_start %lld\n", p->cos.cos_exec_start);
 }
 
 void update_after_offcpu(struct rq *rq, struct task_struct *p)
 {
 	u64 delta, now;
 
-	if (!cos_policy(p->policy))
+	if (!cos_policy(p->policy) || !p->cos.coscg)
 		return;
 
-	VM_BUG_ON(!p->se.exec_start);
+	if (!p->cos.cos_exec_start) 
+		return;
 
 	now = rq_clock_task(rq);
-	delta = now - p->se.exec_start;
-	printk("now %lld - p->se.exec_start %lld = %lld\n", now, p->se.exec_start, delta);
-	if ((s64)delta > 0 && p->cos.coscg) {
+	delta = now - p->cos.cos_exec_start;
+	if ((s64)delta > 0) {
 		ulong lock_flags;
 		spin_lock_irqsave(&p->cos.coscg->lock, lock_flags);
 		printk("spend %d - %d\n", p->cos.coscg->salary, delta);
@@ -660,15 +663,18 @@ int coscg_should_offcpu(struct rq *rq, struct task_struct *p)
 {
 	u64 delta, now;
 
-	if (!cos_policy(p->policy))
+	if (!cos_policy(p->policy) || !p->cos.coscg)
 		return 0;
 
-	VM_BUG_ON(!p->se.exec_start);
+	if (!p->cos.cos_exec_start) 
+		return 1;
 
 	now = rq_clock_task(rq);
-	delta = now - p->se.exec_start;
-	if ((s64)delta > 0 && p->cos.coscg) 
+	delta = now - p->cos.cos_exec_start;
+	if ((s64)delta > 0) {
+		printk("salary %lld delta %lld\n", p->cos.coscg->salary, delta);
 		return p->cos.coscg->salary <= delta;
+	}
 	
 	return 0;
 }
@@ -826,14 +832,13 @@ bool is_dying(struct task_struct *p)
 
 void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct task_struct *next) 
 {
-	
-	if (!cos_policy(prev->policy)) 
+	if (!cos_policy(prev->policy) && !cos_policy(next->policy))
 		return;
 
 	if (is_lord(prev))
 		return;
 
-	if (prev->cos.is_new) {
+	if (cos_policy(prev->policy) && prev->cos.is_new) {
 		if (task_on_rq_queued(prev)) {
 			produce_task_new_msg(prev);
 		} else {
@@ -844,20 +849,18 @@ void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct tas
 		return;
 	}
 
-	if (cos_policy(prev->policy)) {
-		update_after_offcpu(rq, prev);
-	}
-		
-	if (cos_policy(next->policy))
-		update_before_oncpu(rq, next);
+	update_after_offcpu(rq, prev);
 
-	if (prev->cos.is_blocked) {
-		return;
-	}
+	update_before_oncpu(rq, next);
 
-	if (unlikely(prev == next)) {
+	if (!cos_policy(prev->policy)) 
 		return;
-	}
+
+	if (prev->cos.is_blocked) 
+		return;
+
+	if (unlikely(prev == next)) 
+		return;
 
 	ulong flags;
 	spin_lock_irqsave(&rq->cos.lock, flags);
@@ -867,8 +870,8 @@ void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct tas
 
 	printk("preempt by %d sched_class %d\n", next->pid, next->policy);
 
-	if (prev->cos.coscg && prev->cos.coscg->salary < 0) 
-		return;
+	// if (prev->cos.coscg && prev->cos.coscg->salary < 0) 
+	// 	return;
 
 	if (cos_policy(next->policy)) 
 		produce_task_cos_preempt_msg(prev);
@@ -1040,9 +1043,13 @@ struct task_struct * pick_task_cos(struct rq *rq)
 
 void task_tick_cos(struct rq *rq, struct task_struct *p, int queued) 
 {
+	if (!sched_core_enabled(rq)) {
+		return ;
+	}
+
 	if (coscg_should_offcpu(rq, p)) {
-		set_tsk_need_resched(p);
-		set_preempt_need_resched();
+		static_branch_enable(&__sched_core_enabled);
+		resched_curr(rq);
 	}
 }
 

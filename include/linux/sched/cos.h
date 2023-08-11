@@ -10,6 +10,7 @@ struct sched_cos_entity {
 	uint is_blocked;
 	uint is_dying;
 
+	u64	cos_exec_start;
 	struct cos_cgroup *coscg; // set by lord and self dead, read by self
 	// spinlock_t lock; // protect coscg
 };

@@ -106,6 +106,7 @@ struct task_struct init_task
 		.is_new    = 0,
 		.is_blocked    = 0,
 		.is_dying = 0,
+		.cos_exec_start = 0,
 	},
 // #endif
 #endif
