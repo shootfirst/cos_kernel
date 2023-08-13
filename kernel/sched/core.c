@@ -2202,7 +2202,6 @@ static inline void check_class_changed(struct rq *rq, struct task_struct *p,
 		p->sched_class->prio_changed(rq, p, oldprio);
 }
 
-// dzh：检测能否抢占当前线程
 void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags)
 {
 	if (p->sched_class == rq->curr->sched_class)
@@ -2210,7 +2209,7 @@ void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags)
 	else if (sched_class_above(p->sched_class, rq->curr->sched_class) && !is_dying(rq->curr))
 		resched_curr(rq);
 
-// #ifdef CONFIG_SCHED_CLASS_COS
+// SCHED_CLASS_COS
 	else if (sched_class_above(&cos_lord_sched_class, rq->curr->sched_class) &&
 		 is_lord(p)) {
 		/*
@@ -3169,8 +3168,6 @@ static int __set_cpus_allowed_ptr_locked(struct task_struct *p,
 	 */
 	dest_cpu = cpumask_any_and_distribute(cpu_valid_mask, ctx->new_mask);
 	if (dest_cpu >= nr_cpu_ids) {
-		printk("cpu_valid_mask %llx, ctx->new_mask %llx\n", cpu_valid_mask, ctx->new_mask);
-		printk("eee %d\n", p->pid);
 		ret = -EINVAL;
 		goto out;
 	}
@@ -3633,7 +3630,6 @@ out:
 /*
  * The caller (fork, wakeup) owns p->pi_lock, ->cpus_ptr is stable.
  */
-// dzh：注意
 static inline
 int select_task_rq(struct task_struct *p, int cpu, int wake_flags)
 {
@@ -4036,7 +4032,6 @@ static inline bool ttwu_queue_wakelist(struct task_struct *p, int cpu, int wake_
 
 #endif /* CONFIG_SMP */
 
-// dzh：唤醒
 static void ttwu_queue(struct task_struct *p, int cpu, int wake_flags)
 {
 	struct rq *rq = cpu_rq(cpu);
@@ -4217,7 +4212,6 @@ bool ttwu_state_match(struct task_struct *p, unsigned int state, int *success)
  * Return: %true if @p->state changes (an actual wakeup was done),
  *	   %false otherwise.
  */
-// dzh：唤醒
 static int
 try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 {
@@ -4316,7 +4310,6 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	 * TASK_WAKING such that we can unlock p->pi_lock before doing the
 	 * enqueue, such as ttwu_queue_wakelist().
 	 */
-	// dzh：dzh：
 	WRITE_ONCE(p->__state, TASK_WAKING);
 
 	/*
@@ -4375,9 +4368,6 @@ out:
 	if (success)
 		ttwu_stat(p, task_cpu(p), wake_flags);
 	preempt_enable();
-	// ddd
-	// if (p->pid > 2200)
-	// 			printk("111111116 %d %d\n", p->pid, p->__state);
 
 	return success;
 }
@@ -4873,7 +4863,6 @@ unsigned long to_ratio(u64 period, u64 runtime)
  * that must be done for every newly created context, then puts the task
  * on the runqueue and wakes it.
  */
-// dzh：pos 1
 void wake_up_new_task(struct task_struct *p)
 {
 	struct rq_flags rf;
@@ -6027,7 +6016,6 @@ static void put_prev_task_balance(struct rq *rq, struct task_struct *prev,
 /*
  * Pick up the highest-prio task:
  */
-// dzhdzh：
 static inline struct task_struct *
 __pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 {
@@ -6058,9 +6046,6 @@ __pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 
 restart:
 	put_prev_task_balance(rq, prev, rf);
-	// if (cpu_of(rq) == 7) {
-	// 	printk("v\n");
-	// }
 	for_each_class(class) {
 		p = class->pick_next_task(rq);
 		if (p)
@@ -6107,7 +6092,6 @@ extern void task_vruntime_update(struct rq *rq, struct task_struct *p, bool in_f
 
 static void queue_core_balance(struct rq *rq);
 
-// dzhdzh：
 static struct task_struct *
 pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 {
@@ -6622,7 +6606,6 @@ pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
  *
  * WARNING: must be called with preemption disabled!
  */
-// dzh：
 static void __sched notrace __schedule(unsigned int sched_mode)
 {
 	struct task_struct *prev, *next;
@@ -6696,7 +6679,6 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 			 *
 			 * After this, schedule() must not care about p->state any more.
 			 */
-			// printk("f\n");
 			deactivate_task(rq, prev, DEQUEUE_SLEEP | DEQUEUE_NOCLOCK);
 
 			if (prev->in_iowait) {
@@ -6707,11 +6689,6 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 		switch_count = &prev->nvcsw;
 	}
 	next = pick_next_task(rq, prev, &rf);
-	// ddd
-	// if (next->comm[0] == 'g' && next->comm[1] == 'o' && next->comm[2] == 'o' && next->comm[3] == 'd') {
-	// 	dump_stack();
-	// 	printk("crycry\n");
-	// }
 		
 	clear_tsk_need_resched(prev);
 	clear_preempt_need_resched();
@@ -6765,7 +6742,6 @@ void __noreturn do_task_dead(void)
 
 	/* Tell freezer to ignore us: */
 	current->flags |= PF_NOFREEZE;
-	// printk("here\n");
 	__schedule(SM_NONE);
 	BUG();
 
@@ -6817,7 +6793,6 @@ static void sched_update_worker(struct task_struct *tsk)
 	}
 }
 
-// dzh：
 asmlinkage __visible void __sched schedule(void)
 {
 	struct task_struct *tsk = current;
@@ -7083,7 +7058,7 @@ static void __setscheduler_prio(struct task_struct *p, int prio)
 		p->sched_class = &dl_sched_class;
 	else if (rt_prio(prio))
 		p->sched_class = &rt_sched_class;
-// #ifdef CONFIG_SCHED_CLASS_COS
+// SCHED_CLASS_COS
 	else if (cos_policy(p->policy)) {
 		/*
 		 * Here, when a thread set its sched_class to 
@@ -7671,7 +7646,6 @@ req_priv:
 	return 0;
 }
 
-// dzh：起点
 static int __sched_setscheduler(struct task_struct *p,
 				const struct sched_attr *attr,
 				bool user, bool pi)
@@ -8023,7 +7997,6 @@ EXPORT_SYMBOL_GPL(sched_set_normal);
 static int
 do_sched_setscheduler(pid_t pid, int policy, struct sched_param __user *param)
 {
-	printk("start %d\n", policy);
 	struct sched_param lparam;
 	struct task_struct *p;
 	int retval;
@@ -8044,11 +8017,10 @@ do_sched_setscheduler(pid_t pid, int policy, struct sched_param __user *param)
 		retval = sched_setscheduler(p, policy, &lparam);
 		put_task_struct(p);
 	}
-	printk("end %d\n", policy);
 	return retval;
 }
 
-//==================================SCHED_CLASS_COS=================================
+// SCHED_CLASS_COS
 static int do_set_lord(int cpu_id) 
 {
 	return cos_do_set_lord(cpu_id);
@@ -8105,9 +8077,8 @@ void cos_local_shoot(void)
 
 	VM_BUG_ON(this_rq()->cpu != cpu);
 }
-//==================================SCHED_CLASS_COS=================================
 
-//==================================SCHED_CLASS_COS=================================
+// SCHED_CLASS_COS
 
 static int do_coscg_create(void) 
 {
@@ -8128,8 +8099,6 @@ static int do_coscg_delete(int cos_cgid)
 {
 	return cos_do_coscg_delete(cos_cgid);
 }
-
-//==================================SCHED_CLASS_COS=================================
 
 
 
@@ -8204,7 +8173,7 @@ SYSCALL_DEFINE3(sched_setscheduler, pid_t, pid, int, policy, struct sched_param 
 	return do_sched_setscheduler(pid, policy, param);
 }
 
-//===============================SCHED_CLASS_COS==============================
+// SCHED_CLASS_COS
 /**
  * sys_set_lord - set current thread as the lord, running on the cpu_id
  * @cpu_id: the cpu id in question.
@@ -8235,10 +8204,9 @@ SYSCALL_DEFINE0(init_shoot)
 {
 	return do_init_shoot();
 }
-//===============================SCHED_CLASS_COS==============================
 
 
-//===============================SCHED_CLASS_COS==============================
+// SCHED_CLASS_COS
 /**
  * sys_cos_create_cgroup
  * @cpu_id: the cpu id in question.
@@ -8279,7 +8247,6 @@ SYSCALL_DEFINE1(coscg_delete, int, cos_cgid)
 {
 	return do_coscg_delete(cos_cgid);
 }
-//===============================SCHED_CLASS_COS==============================
 
 /**
  * sys_sched_setparam - set/change the RT priority of a thread
@@ -8585,7 +8552,7 @@ out_free_cpus_allowed:
 	free_cpumask_var(cpus_allowed);
 	return retval;
 }
-// dzh：
+
 long sched_setaffinity(pid_t pid, const struct cpumask *in_mask)
 {
 	struct affinity_context ac;
@@ -8685,7 +8652,7 @@ SYSCALL_DEFINE3(sched_setaffinity, pid_t, pid, unsigned int, len,
 	return retval;
 }
 
-// ==========================================SCHED_CLASS_COS============================================
+// SCHED_CLASS_COS
 /**
  * sys_shoot_task
  * @cpu: the cpu id in question.
@@ -8709,7 +8676,6 @@ SYSCALL_DEFINE2(shoot_task, unsigned int, len,
 	free_cpumask_var(shoot_mask);
 	return retval;
 }
-// ==========================================SCHED_CLASS_COS============================================
 
 long sched_getaffinity(pid_t pid, struct cpumask *mask)
 {
@@ -9178,7 +9144,6 @@ EXPORT_SYMBOL(yield);
  *	false (0) if we failed to boost the target.
  *	-ESRCH if there's no task to yield to.
  */
-// dzh：放弃
 int __sched yield_to(struct task_struct *p, bool preempt)
 {
 	struct task_struct *curr = current;
@@ -10157,7 +10122,6 @@ LIST_HEAD(task_groups);
 static struct kmem_cache *task_group_cache __read_mostly;
 #endif
 
-// dzh：初始化
 void __init sched_init(void)
 {
 	unsigned long ptr = 0;
@@ -10751,7 +10715,6 @@ static void sched_change_group(struct task_struct *tsk, struct task_group *group
  * now. This function just updates tsk->se.cfs_rq and tsk->se.parent to reflect
  * its new group.
  */
-// dzh：1
 void sched_move_task(struct task_struct *tsk)
 {
 	int queued, running, queue_flags =

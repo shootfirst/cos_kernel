@@ -1,4 +1,4 @@
-// CONFIG_SCHED_CLASS_COS
+// SCHED_CLASS_COS
 
 #include <linux/mm.h>
 #include <linux/file.h>
@@ -34,7 +34,7 @@ ktime_t kt;
 
 
 
-// =====================================工具=============================================
+// =====================================tools function=============================================
 /**
  * find_process_by_pid - find a process with a matching PID value.
  * used in sys_sched_set/getaffinity() in kernel/sched/core.c, so
@@ -49,7 +49,7 @@ static struct task_struct *find_process_by_pid(pid_t pid)
 
 
 
-// =======================================cos全局==========================================
+// =======================================cos global function==========================================
 void coscg_pay_salary(void)
 {
 	struct rhashtable_iter iter;
@@ -65,7 +65,6 @@ void coscg_pay_salary(void)
 			ulong flags;
 			spin_lock_irqsave(&coscg->lock, flags);
 			coscg->salary = (u64)coscg->rate * (_COS_CGROUP_INTERVAL_NS / _COS_CGROUP_MAX_RATE);
-			// printk("pay salary %lld\n",coscg->salary);
 			spin_unlock_irqrestore(&coscg->lock, flags);
 
 			coscg = rhashtable_walk_next(&iter);
@@ -229,7 +228,7 @@ move_fail:
 
 
 
-//===================================共享内存相关=====================================
+//===================================shm=====================================
 static int _cos_mmap_common(struct vm_area_struct *vma, ulong mapsize)
 {
 	static const struct vm_operations_struct cos_vm_ops = {};
@@ -255,12 +254,6 @@ static int _cos_mmap_common(struct vm_area_struct *vma, ulong mapsize)
 	/* The entire region must be mapped */
 	if (vma->vm_pgoff)
 		return -EINVAL;
-
-	// if (vma->vm_end - vma->vm_start != mapsize) {
-	// 	printk("vma->vm_end %llu - vma->vm_start%llu = %llu != size %d\n", vma->vm_end, vma->vm_start, vma->vm_end- vma->vm_start, mapsize);
-	// 	return -EINVAL;
-	// }
-		
 
 	/*
 	 * Don't allow mprotect(2) to relax permissions beyond what
@@ -341,7 +334,7 @@ int _produce(struct cos_msg *msg)
 	global_mq->head++;
 	smp_wmb(); /* publish head update */
 
-	printk("kernel produce msg: type: %d, pid %d\n", msg->type, msg->pid);
+	// printk("kernel produce msg: type: %d, pid %d\n", msg->type, msg->pid);
 	spin_unlock_irqrestore(&cos_mq_lock, flags);
 
 	return 0;
@@ -382,7 +375,7 @@ int produce_task_message(u_int32_t msg_type, struct task_struct *p)
 	}
 
 	msg.pid = p->pid;
-	// printk("kernel produce msg: type: %d, pid %d\n", msg_type, p->pid);
+	
 	return _produce(&msg);
 
 }
@@ -538,10 +531,9 @@ int cos_do_shoot_task(cpumask_var_t shoot_mask)
 		if (unlikely(!p)) {
 			/* 
 			 * We continue when the pid getting from user
-			 * is not valid. TODO：是否需要通知用户态
+			 * is not valid. 
 		 	 */
 			rcu_read_unlock();
-			printk("shoot pid %d is not exist\n", pid);
 			continue;
 		}
 		
@@ -556,13 +548,11 @@ int cos_do_shoot_task(cpumask_var_t shoot_mask)
 
 		if (unlikely(p->cos.is_dying)) {
 			task_shoot_area->area[cpu_id].info = _SA_ERROR;
-			// printk("task %d is dying, can not be shot!\n", p->pid, cpu_id);
 			continue;
 		}
 		
 		if (unlikely(!task_is_running(p))) {
 			task_shoot_area->area[cpu_id].info = _SA_ERROR;
-			printk("no sync in the shoot loop! %d to cpu %d\n", p->pid, cpu_id);
 			continue;
 		}
 
@@ -570,7 +560,6 @@ int cos_do_shoot_task(cpumask_var_t shoot_mask)
 		rq = cpu_rq(cpu_id);
 		if (unlikely(!rq)) {
 			task_shoot_area->area[cpu_id].info = _SA_ERROR;
-			printk("shoot cpu %d is not exist\n", cpu_id);
 			continue;
 		}
 
@@ -579,7 +568,6 @@ int cos_do_shoot_task(cpumask_var_t shoot_mask)
 			if (unlikely(rq->cos.next_to_sched->cos.is_dying)) {
 				task_shoot_area->area[cpu_id].info = _SA_ERROR;
 				spin_unlock_irqrestore(&rq->cos.lock, flags);
-				printk("task %d is dying, can not be shot!\n", p->pid, cpu_id);
 				continue;
 			}
 		}
@@ -587,7 +575,7 @@ int cos_do_shoot_task(cpumask_var_t shoot_mask)
 		rq->cos.is_shoot_first = 1;
 		spin_unlock_irqrestore(&rq->cos.lock, flags);
 
-		printk("shoot thread %d to cpu %d\n", p->pid, cpu_id);
+		// printk("shoot thread %d to cpu %d\n", p->pid, cpu_id);
 
 
 		/* Finally we set the ipimask or local shoot is needed */
@@ -631,11 +619,9 @@ int cos_do_shoot_task(cpumask_var_t shoot_mask)
 void update_before_oncpu(struct rq *rq, struct task_struct *p)
 {
 	if (!cos_policy(p->policy) || !p->cos.coscg) {
-		// printk("p->pid %d, !cos_policy(p->policy) %d, !p->cos.coscg %d\n", p->pid, !cos_policy(p->policy), !p->cos.coscg);
 		return;
 	}
 	p->cos.cos_exec_start = rq_clock_task(rq);
-	printk("p->cos.cos_exec_start %lld\n", p->cos.cos_exec_start);
 }
 
 void update_after_offcpu(struct rq *rq, struct task_struct *p)
@@ -653,7 +639,6 @@ void update_after_offcpu(struct rq *rq, struct task_struct *p)
 	if ((s64)delta > 0) {
 		ulong lock_flags;
 		spin_lock_irqsave(&p->cos.coscg->lock, lock_flags);
-		printk("spend %d - %d\n", p->cos.coscg->salary, delta);
 		p->cos.coscg->salary -= delta;
 		spin_unlock_irqrestore(&p->cos.coscg->lock, lock_flags);
 	}
@@ -672,7 +657,6 @@ int coscg_should_offcpu(struct rq *rq, struct task_struct *p)
 	now = rq_clock_task(rq);
 	delta = now - p->cos.cos_exec_start;
 	if ((s64)delta > 0) {
-		printk("salary %lld delta %lld\n", p->cos.coscg->salary, delta);
 		return p->cos.coscg->salary <= delta;
 	}
 	
@@ -810,7 +794,7 @@ int cos_do_coscg_ctl(int coscg_id, pid_t pid, int mode)
 
 
 
-//==================================core.c使用的函数=====================================
+//==================================used by core.c=====================================
 
 void init_cos_rq(struct cos_rq *cos_rq) 
 {
@@ -868,11 +852,8 @@ void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct tas
 		rq->cos.next_to_sched = NULL;
 	spin_unlock_irqrestore(&rq->cos.lock, flags);
 
-	printk("preempt by %d sched_class %d\n", next->pid, next->policy);
-
-	// if (prev->cos.coscg && prev->cos.coscg->salary < 0) 
-	// 	return;
-
+	// printk("preempt by %d sched_class %d\n", next->pid, next->policy);
+	// cos thread is shoot to cpu but do not run to here, and it is preempted by another cos thread for shooting, so it is leaking! TODO
 	if (cos_policy(next->policy)) 
 		produce_task_cos_preempt_msg(prev);
 	else 
@@ -885,7 +866,7 @@ void cos_prepare_task_switch(struct rq *rq, struct task_struct *prev, struct tas
 
 
 
-//==================================cos调度类=====================================
+//==================================cos sched class=====================================
 
 void enqueue_task_cos(struct rq *rq, struct task_struct *p, int flags) 
 {
@@ -906,8 +887,6 @@ void dequeue_task_cos(struct rq *rq, struct task_struct *p, int flags)
 		rq->cos.next_to_sched = NULL;
 		p->cos.is_blocked = 1;
 		produce_task_blocked_msg(p);
-		// printk("set blocked %d, flag %x\n", p->pid, flags);
-		// dump_stack();
 	}
 	spin_unlock_irqrestore(&rq->cos.lock, lock_flags);
 	
@@ -962,7 +941,6 @@ void task_dead_cos(struct task_struct *p)
 	ulong flags;
 	spin_lock_irqsave(&rq->cos.lock, flags);
 	if (rq->cos.next_to_sched == p) {
-		// printk("set dead %d\n", p->pid);
 		rq->cos.next_to_sched = NULL;
 	}
 	spin_unlock_irqrestore(&rq->cos.lock, flags);
@@ -975,7 +953,6 @@ void task_dead_cos(struct task_struct *p)
 
 int select_task_rq_cos(struct task_struct *p, int task_cpu, int flags) 
 {
-	printk("select_task_rq_cos, lord_cpu %d\n", lord_cpu);
 	if (is_lord(p)) {
 		return lord_cpu;
 	}
@@ -990,54 +967,51 @@ void task_woken_cos(struct rq *this_rq, struct task_struct *task)
 
 void yield_task_cos(struct rq *rq) 
 {
-	printk("yield_task_cos\n");
+	
 }
 
 bool yield_to_task_cos(struct rq *rq, struct task_struct *p) 
 {
-	printk("yield_to_task_cos\n");
 	return false;
 }
 
 void check_preempt_curr_cos(struct rq *rq, struct task_struct *p, int flags) 
 {
-	printk("check_preempt_curr_cos\n");
+
 }
 
 void put_prev_task_cos(struct rq *rq, struct task_struct *p) 
 {
-	// printk("put_prev_task_cos\n");
+	
 }
 
 void set_next_task_cos(struct rq *rq, struct task_struct *p, bool first) 
 {
-	// printk("set_next_task_cos\n");
+	
 }
 
 int balance_cos(struct rq *rq, struct task_struct *prev, struct rq_flags *rf) 
 {
-	// printk("balance_cos\n");
 	return 0;
 }
 
 void set_cpus_allowed_cos(struct task_struct *p, struct affinity_context *ctx) 
 {
-	printk("set_cpus_allowed_cos\n");
+
 }
 
 void rq_online_cos(struct rq *rq) 
 {
-	printk("rq_online_cos\n");
+
 }
 	
 void rq_offline_cos(struct rq *rq) 
 {
-	printk("rq_offline_cos\n");
+
 }
 
 struct task_struct * pick_task_cos(struct rq *rq) 
 {
-	printk("pick_task_cos\n");
 	return NULL;
 }
 
@@ -1055,17 +1029,17 @@ void task_tick_cos(struct rq *rq, struct task_struct *p, int queued)
 
 void switched_to_cos(struct rq *this_rq, struct task_struct *task) 
 {
-	printk("switched_to_cos\n");
+
 }
 
 void prio_changed_cos(struct rq *this_rq, struct task_struct *task, int oldprio) 
 {
-	printk("prio_changed_cos\n");
+
 }
 
 void update_curr_cos(struct rq *rq) 
 {
-	printk("update_curr_cos\n");
+
 }
 
 DEFINE_SCHED_CLASS(cos) = {
@@ -1113,7 +1087,7 @@ DEFINE_SCHED_CLASS(cos) = {
 
 
 
-//==================================cos lord调度类=====================================
+//==================================cos lord sched class=====================================
 
 struct task_struct *pick_next_task_cos_lord(struct rq *rq) {
 	ulong flags;
@@ -1125,7 +1099,6 @@ struct task_struct *pick_next_task_cos_lord(struct rq *rq) {
 	}
 	spin_unlock_irqrestore(&rq->cos.lock, flags);
 
-	// lord不为空 lord可以运行 lord此时没有处于shoot负载的状态
 	if (rq->cos.lord != NULL && task_is_running(rq->cos.lord) && lord_on_rq) {
 		return rq->cos.lord;
 	}

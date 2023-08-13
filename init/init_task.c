@@ -101,14 +101,13 @@ struct task_struct init_task
 #endif
 #ifdef CONFIG_CGROUP_SCHED
 	.sched_task_group = &root_task_group,
-// #ifdef CONFIG_SCHED_CLASS_COS
+// SCHED_CLASS_COS
 	.cos		= {
 		.is_new    = 0,
 		.is_blocked    = 0,
 		.is_dying = 0,
 		.cos_exec_start = 0,
 	},
-// #endif
 #endif
 	.ptraced	= LIST_HEAD_INIT(init_task.ptraced),
 	.ptrace_entry	= LIST_HEAD_INIT(init_task.ptrace_entry),

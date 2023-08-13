@@ -807,13 +807,11 @@ static void synchronize_group_exit(struct task_struct *tsk, long code)
 	spin_unlock_irq(&sighand->siglock);
 }
 
-// dzh：
 void __noreturn do_exit(long code)
 {
 	struct task_struct *tsk = current;
 	// SCHED_CLASS_COS
 	if (tsk->policy == SCHED_COS) {
-		printk("exit start %d\n", tsk->pid);
 		tsk->cos.is_dying = 1;
 	}
 	int group_dead;

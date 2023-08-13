@@ -52,7 +52,6 @@
 #include "cputime.c"
 #include "deadline.c"
 
-// #ifdef CONFIG_SCHED_CLASS_COS
+// SCHED_CLASS_COS
 # include "cos.c"
-// #endif
 

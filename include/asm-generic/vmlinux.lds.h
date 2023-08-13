@@ -124,7 +124,7 @@
  * used to determine the order of the priority of each sched class in
  * relation to each other.
  */
-// CONFIG_SCHED_CLASS_COS
+// SCHED_CLASS_COS
 #define SCHED_DATA				\
 	STRUCT_ALIGN();				\
 	__sched_class_highest = .;		\

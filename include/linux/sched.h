@@ -792,9 +792,8 @@ struct task_struct {
 	struct sched_entity		se;
 	struct sched_rt_entity		rt;
 	struct sched_dl_entity		dl;
-// #ifdef CONFIG_SCHED_CLASS_COS
+// SCHED_CLASS_COS
 	struct sched_cos_entity		cos;
-// #endif
 	const struct sched_class	*sched_class;
 
 #ifdef CONFIG_SCHED_CORE
@@ -2001,7 +2000,6 @@ extern char *__get_task_comm(char *to, size_t len, struct task_struct *tsk);
 	__get_task_comm(buf, sizeof(buf), tsk);		\
 })
 
-// dzh：
 #ifdef CONFIG_SMP
 static __always_inline void scheduler_ipi(void)
 {
@@ -2010,9 +2008,6 @@ static __always_inline void scheduler_ipi(void)
 	 * TIF_NEED_RESCHED remotely (for the first time) will also send
 	 * this IPI.
 	 */
-	// if (smp_processor_id() == 7) {
-	// 	printk("a: %d\n", tif_need_resched());
-	// }
 	preempt_fold_need_resched();
 }
 #else

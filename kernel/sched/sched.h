@@ -654,7 +654,7 @@ struct cfs_rq {
 #endif /* CONFIG_FAIR_GROUP_SCHED */
 };
 
-// #ifdef CONFIG_SCHED_CLASS_COS
+// SCHED_CLASS_COS
 struct cos_rq {
 	struct task_struct *lord;
 	spinlock_t lock;
@@ -1009,7 +1009,7 @@ struct rq {
 	struct cfs_rq		cfs;
 	struct rt_rq		rt;
 	struct dl_rq		dl;
-// #ifdef CONFIG_SCHED_CLASS_COS
+// SCHED_CLASS_COS
 	struct cos_rq		cos;
 // #endif
 
@@ -3503,7 +3503,7 @@ static inline void init_sched_mm_cid(struct task_struct *t) { }
 
 // SCHED_CLASS_COS
 #include "cos.h"
-// cos.c需要使用core.c中定义的cos相关函数
+// used by cos.c
 int cos_set_cpus_allowed(struct task_struct *p, const struct cpumask *mask);
 void cos_remote_shoot(struct cpumask *ipi_mask);
 void cos_local_shoot(void);
