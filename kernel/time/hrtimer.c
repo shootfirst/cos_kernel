@@ -1810,7 +1810,7 @@ retry:
 		cpu_base->softirq_activated = 1;
 		raise_softirq_irqoff(HRTIMER_SOFTIRQ);
 	}
-// dzh：在这里唤醒！！！
+
 	__hrtimer_run_queues(cpu_base, now, flags, HRTIMER_ACTIVE_HARD);
 
 	/* Reevaluate the clock bases for the [soft] next expiry */
